@@ -2,11 +2,11 @@
 #define CATCH_CONFIG_RUNNER
 
 #include <catch2/catch.hpp>
-#include <xxx/common.test.hpp>
+#include <urn/common.test.hpp>
 #include <cstdlib>
 
 
-#if __xxx_os_windows && !NDEBUG
+#if __urn_os_windows && !NDEBUG
 
 int report_hook (int report_type, char *message, int *return_value)
 {
@@ -38,9 +38,9 @@ int main (int argc, char *argv[])
 
 void *operator new (size_t size)
 {
-  if (xxx_test::bad_alloc_once::fail)
+  if (urn_test::bad_alloc_once::fail)
   {
-    xxx_test::bad_alloc_once::fail = false;
+    urn_test::bad_alloc_once::fail = false;
     throw std::bad_alloc();
   }
   return std::malloc(size);
@@ -59,7 +59,7 @@ void operator delete (void *ptr, size_t) noexcept
 }
 
 
-namespace xxx_test {
+namespace urn_test {
 
 bool on_appveyor_ci ()
 {
@@ -73,4 +73,4 @@ bool on_travis_ci ()
   return has_env;
 }
 
-} // namespace xxx_test
+} // namespace urn_test

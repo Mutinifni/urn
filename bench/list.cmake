@@ -1,4 +1,4 @@
-list(APPEND xxx_benchmarks_sources
+list(APPEND urn_benchmarks_sources
   bench/main.cpp
   bench/invoke.cpp
 )

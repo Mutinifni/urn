@@ -1,35 +1,35 @@
 #pragma once
 
 /**
- * \file xxx/error.hpp
- * XXX library error codes
+ * \file urn/error.hpp
+ * urn library error codes
  */
 
-#include <xxx/__bits/lib.hpp>
+#include <urn/__bits/lib.hpp>
 #include <system_error>
 
 
-__xxx_begin
+__urn_begin
 
 
-#define __xxx_errc(X_) \
+#define __urn_errc(X_) \
   X_(__0, "internal placeholder for not an error") \
   X_(temporary_error, "temporary error")
 
 
 /**
- * XXX error codes
+ * urn error codes
  */
 enum class errc
 {
-  #define __xxx_errc_list(code, message) code,
-    __xxx_errc(__xxx_errc_list)
-  #undef __xxx_errc_list
+  #define __urn_errc_list(code, message) code,
+    __urn_errc(__urn_errc_list)
+  #undef __urn_errc_list
 };
 
 
 /**
- * Return XXX error category. The name() virtual function returns "xxx".
+ * Return urn error category. The name() virtual function returns "urn".
  */
 const std::error_category &error_category () noexcept;
 
@@ -43,13 +43,13 @@ inline std::error_code make_error_code (errc ec) noexcept
 }
 
 
-__xxx_end
+__urn_end
 
 
 namespace std {
 
 template <>
-struct is_error_code_enum<xxx::errc>
+struct is_error_code_enum<urn::errc>
     : true_type
 { };
 

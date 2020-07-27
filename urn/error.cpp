@@ -1,8 +1,8 @@
-#include <xxx/error.hpp>
+#include <urn/error.hpp>
 #include <string>
 
 
-__xxx_begin
+__urn_begin
 
 
 namespace {
@@ -11,9 +11,9 @@ constexpr std::string_view to_string_view (errc ec) noexcept
 {
   switch (ec)
   {
-    #define __xxx_errc_case(code, message) case xxx::errc::code: return message;
-      __xxx_errc(__xxx_errc_case)
-    #undef __xxx_errc_case
+    #define __urn_errc_case(code, message) case urn::errc::code: return message;
+      __urn_errc(__urn_errc_case)
+    #undef __urn_errc_case
 
     default:
       return "unknown";
@@ -30,7 +30,7 @@ const std::error_category &error_category () noexcept
   {
     [[nodiscard]] const char *name () const noexcept final
     {
-      return "xxx";
+      return "urn";
     }
 
     [[nodiscard]] std::string message (int ec) const final
@@ -43,4 +43,4 @@ const std::error_category &error_category () noexcept
 }
 
 
-__xxx_end
+__urn_end

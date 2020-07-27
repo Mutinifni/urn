@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__xxx_begin)
+#if defined(__urn_begin)
   #error This header must be included first
 #endif
 

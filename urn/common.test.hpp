@@ -5,7 +5,7 @@
 #include <string>
 
 
-namespace xxx_test {
+namespace urn_test {
 
 
 inline std::string case_name ()
@@ -35,4 +35,4 @@ struct bad_alloc_once
 };
 
 
-} // namespace xxx_test
+} // namespace urn_test
