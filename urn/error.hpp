@@ -14,7 +14,7 @@ __urn_begin
 
 #define __urn_errc(X_) \
   X_(__0, "internal placeholder for not an error") \
-  X_(temporary_error, "temporary error")
+  X_(not_inet_v4_endpoint, "not inet v4 endpoint")
 
 
 /**
