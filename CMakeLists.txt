@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.13)
 
 project(urn LANGUAGES CXX)
 include(cmake/project_version.cmake)
@@ -51,14 +51,14 @@ endif()
 
 include(urn/list.cmake)
 
-add_library(urn ${urn_sources})
+add_library(urn INTERFACE)
 add_library(urn::urn ALIAS urn)
+target_sources(urn INTERFACE ${urn_sources})
 target_include_directories(urn
-  PUBLIC
+  INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_compile_options(urn PRIVATE ${max_warning_flags})
 
 
 # Tests
