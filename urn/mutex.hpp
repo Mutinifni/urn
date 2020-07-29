@@ -12,16 +12,15 @@
 __urn_begin
 
 
-template <size_t MaxThreads>
+template <bool MultiThreaded>
 struct mutex: public std::mutex
 {
-  static_assert(MaxThreads > 1);
   using std::mutex::mutex;
 };
 
 
 template <>
-struct mutex<1>
+struct mutex<false>
 {
   mutex () = default;
 

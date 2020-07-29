@@ -7,8 +7,8 @@ namespace {
 
 
 TEMPLATE_TEST_CASE("mutex", "",
-  urn::mutex<1>,
-  urn::mutex<2>)
+  urn::mutex<false>,
+  urn::mutex<true>)
 {
   TestType mutex;
 
@@ -19,7 +19,7 @@ TEMPLATE_TEST_CASE("mutex", "",
 
   SECTION("double lock")
   {
-    if constexpr (std::is_same_v<TestType, urn::mutex<1>>)
+    if constexpr (std::is_same_v<TestType, urn::mutex<false>>)
     {
       mutex.lock();
       mutex.lock();
