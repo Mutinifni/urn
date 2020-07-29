@@ -23,7 +23,6 @@ jobs:
       compiler: gcc
       env:
         - BUILD_TYPE=Coverage
-        - secure:
 
 addons:
   apt:
@@ -31,8 +30,6 @@ addons:
       - g++-8
       - clang-9
       - ninja-build
-      - doxygen
-      - graphviz
   homebrew:
     packages:
       - gcc
