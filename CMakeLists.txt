@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.8)
 
 project(urn LANGUAGES CXX)
 include(cmake/project_version.cmake)
@@ -53,8 +53,7 @@ include(urn/list.cmake)
 
 add_library(urn INTERFACE)
 add_library(urn::urn ALIAS urn)
-cmake_policy(SET CMP0076 NEW)
-target_sources(urn INTERFACE ${urn_sources})
+#target_sources(urn INTERFACE ${urn_sources})
 target_include_directories(urn
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
