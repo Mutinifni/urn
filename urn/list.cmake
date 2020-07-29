@@ -6,7 +6,6 @@ list(APPEND urn_sources
   urn/error.hpp
   urn/error.cpp
   urn/mutex.hpp
-  urn/span.hpp
 )
 
 list(APPEND urn_unittests_sources
@@ -15,5 +14,4 @@ list(APPEND urn_unittests_sources
   urn/endpoint_v4.test.cpp
   urn/error.test.cpp
   urn/mutex.test.cpp
-  urn/span.test.cpp
 )
