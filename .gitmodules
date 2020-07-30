@@ -4,3 +4,6 @@
 [submodule "extern/google_benchmark"]
 	path = extern/google_benchmark
 	url = ../../google/benchmark
+[submodule "extern/libuv_libuv"]
+	path = extern/libuv_libuv
+	url = ../../libuv/libuv

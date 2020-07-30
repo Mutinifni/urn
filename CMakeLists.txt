@@ -7,6 +7,11 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 
 # User settings {{{1
 
+# Experiments
+# (note: all are turned off for Coverage build)
+option(urn_libuv "Experiment with libuv" ON)
+
+# Business logic settings
 option(urn_unittests "Build unittests" ON)
 option(urn_benchmarks "Build benchmarking application" OFF)
 
@@ -15,6 +20,7 @@ if(CMAKE_BUILD_TYPE MATCHES Coverage)
   set(Coverage ON)
   set(urn_unittests ON)
   set(urn_benchmarks OFF)
+  set(urn_libuv OFF)
 endif()
 
 
@@ -61,7 +67,7 @@ target_include_directories(urn
 )
 
 
-# Tests
+# Tests {{{2
 if(urn_unittests)
   message(STATUS "Enable unittests")
   enable_testing()
@@ -74,7 +80,7 @@ if(urn_unittests)
 endif()
 
 
-# Benchmarks
+# Benchmarks {{{2
 if(urn_benchmarks)
   message(STATUS "Enable benchmarks")
   include(cmake/google_benchmark.cmake)
@@ -82,3 +88,20 @@ if(urn_benchmarks)
   add_executable(benchmarks ${urn_benchmarks_sources})
   target_link_libraries(benchmarks urn::urn benchmark)
 endif()
+
+
+# Experiments {{{2
+if(urn_libuv)
+  include(libuv/list.cmake)
+endif()
+
+foreach(experiment ${urn_experiments})
+  # target per experiment
+  message(STATUS "Enable ${experiment} experiment")
+  add_executable(urn_${experiment} ${urn_${experiment}_sources})
+  target_compile_options(urn_${experiment} PRIVATE ${max_warning_flags})
+  target_include_directories(urn_${experiment} PRIVATE ${${experiment}_INCLUDE_DIR})
+  if(urn_${experiment}_libs)
+    target_link_libraries(urn_${experiment} urn::urn ${urn_${experiment}_libs})
+  endif()
+endforeach()
