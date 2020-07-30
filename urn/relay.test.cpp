@@ -1,6 +1,5 @@
 #include <urn/relay.hpp>
 #include <urn/common.test.hpp>
-#include <array>
 #include <utility>
 
 
@@ -11,6 +10,32 @@ struct test_lib
 {
   using endpoint = uint64_t;
   using time = int;
+
+
+  struct packet
+  {
+    const std::byte *ptr;
+    size_t len;
+
+
+    template <typename C>
+    packet (const C &c) noexcept
+      : ptr{reinterpret_cast<const std::byte *>(std::data(c))}
+      , len{std::size(c) * sizeof(*std::data(c))}
+    { }
+
+
+    const std::byte *data () const noexcept
+    {
+      return ptr;
+    }
+
+
+    size_t size () const noexcept
+    {
+      return len;
+    }
+  };
 
 
   struct client
@@ -65,7 +90,7 @@ struct test_lib
     }
 
 
-    void start_send (std::pair<const std::byte *, size_t>) noexcept
+    void start_send (const packet &) noexcept
     {
       start_send_invoked = true;
     }
@@ -101,15 +126,6 @@ using single_threaded = urn::relay<test_lib, false>;
 using multi_threaded = urn::relay<test_lib, true>;
 
 
-template <typename C>
-std::pair<const std::byte *, size_t> as_bytes (const C &c)
-{
-  auto data = std::data(c);
-  auto length = sizeof(*data) * std::size(c);
-  return {reinterpret_cast<const std::byte *>(data), length};
-}
-
-
 TEMPLATE_TEST_CASE("relay", "",
   single_threaded,
   multi_threaded)
@@ -124,8 +140,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
   SECTION("on_client_received: invalid registration")
   {
-    std::array<uint64_t, 2> packet = { a_id, 100 };
-    relay.on_client_received(a_src, as_bytes(packet));
+    uint64_t data[] = { a_id, 100 };
+    relay.on_client_received(a_src, data);
     CHECK(test_lib::session::last_created() == nullptr);
     CHECK(client.is_start_recv_invoked());
     CHECK_FALSE(peer.is_start_recv_invoked());
@@ -134,8 +150,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
   SECTION("on_client_received: successful registration")
   {
-    std::array packet = { a_id };
-    relay.on_client_received(a_src, as_bytes(packet));
+    uint64_t data[] = { a_id };
+    relay.on_client_received(a_src, data);
 
     // receives must be restarted
     CHECK(client.is_start_recv_invoked());
@@ -150,14 +166,14 @@ TEMPLATE_TEST_CASE("relay", "",
 
   SECTION("on_client_received: duplicate registration")
   {
-    std::array packet = { a_id };
+    uint64_t data[] = { a_id };
 
     // first
-    relay.on_client_received(a_src, as_bytes(packet));
+    relay.on_client_received(a_src, data);
     REQUIRE(test_lib::session::last_created() != nullptr);
 
     // second
-    relay.on_client_received(b_src, as_bytes(packet));
+    relay.on_client_received(b_src, data);
     CHECK(test_lib::session::last_created() == nullptr);
   }
 
@@ -166,8 +182,8 @@ TEMPLATE_TEST_CASE("relay", "",
   {
     // first
     {
-      std::array packet = { a_id };
-      relay.on_client_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id };
+      relay.on_client_received(a_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       auto a = test_lib::session::last_created();
@@ -177,8 +193,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
     // second
     {
-      std::array packet = { b_id };
-      relay.on_client_received(b_src, as_bytes(packet));
+      uint64_t data[] = { b_id };
+      relay.on_client_received(b_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       auto b = test_lib::session::last_created();
@@ -190,8 +206,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
   SECTION("on_peer_received: invalid data")
   {
-    std::array packet = { char('a') };
-    relay.on_peer_received(a_src, as_bytes(packet));
+    char data[] = { 'a' };
+    relay.on_peer_received(a_src, data);
     CHECK_FALSE(client.is_start_recv_invoked());
     CHECK(peer.is_start_recv_invoked());
   }
@@ -202,8 +218,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // successful registration
     test_lib::session *session = nullptr;
     {
-      std::array packet = { a_id };
-      relay.on_client_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id };
+      relay.on_client_received(a_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       session = test_lib::session::last_created();
@@ -212,8 +228,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
     // send to invalid registration
     {
-      std::array<uint64_t, 2> packet = { b_id, 100 };
-      relay.on_peer_received(a_src, as_bytes(packet));
+      uint64_t data[] = { b_id, 100 };
+      relay.on_peer_received(a_src, data);
       CHECK(peer.is_start_recv_invoked());
       CHECK_FALSE(session->is_start_send_invoked());
     }
@@ -225,8 +241,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // registration
     test_lib::session *session = nullptr;
     {
-      std::array packet = { a_id };
-      relay.on_client_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id };
+      relay.on_client_received(a_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       session = test_lib::session::last_created();
@@ -235,8 +251,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
     // forward
     {
-      std::array<uint64_t, 2> packet = { a_id, 100 };
-      relay.on_peer_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id, 100 };
+      relay.on_peer_received(a_src, data);
       CHECK(session->is_start_send_invoked());
 
       // new receive is started only after session start_send has finished
@@ -252,8 +268,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // register a
     test_lib::session *a = nullptr;
     {
-      std::array packet = { a_id };
-      relay.on_client_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id };
+      relay.on_client_received(a_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       a = test_lib::session::last_created();
@@ -263,8 +279,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // register b
     test_lib::session *b = nullptr;
     {
-      std::array packet = { b_id };
-      relay.on_client_received(b_src, as_bytes(packet));
+      uint64_t data[] = { b_id };
+      relay.on_client_received(b_src, data);
       CHECK(client.is_start_recv_invoked());
       CHECK(peer.is_start_recv_invoked());
       b = test_lib::session::last_created();
@@ -273,8 +289,8 @@ TEMPLATE_TEST_CASE("relay", "",
 
     // forward
     {
-      std::array<uint64_t, 2> packet = { a_id, 100 };
-      relay.on_peer_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id, 100 };
+      relay.on_peer_received(a_src, data);
       CHECK(a->is_start_send_invoked());
       CHECK_FALSE(b->is_start_send_invoked());
 
@@ -289,8 +305,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // register a
     test_lib::session *a = nullptr;
     {
-      std::array packet = { a_id };
-      relay.on_client_received(a_src, as_bytes(packet));
+      uint64_t data[] = { a_id };
+      relay.on_client_received(a_src, data);
       a = test_lib::session::last_created();
       REQUIRE(a != nullptr);
     }
@@ -298,8 +314,8 @@ TEMPLATE_TEST_CASE("relay", "",
     // register b
     test_lib::session *b = nullptr;
     {
-      std::array packet = { b_id };
-      relay.on_client_received(b_src, as_bytes(packet));
+      uint64_t data[] = { b_id };
+      relay.on_client_received(b_src, data);
       b = test_lib::session::last_created();
       REQUIRE(b != nullptr);
     }

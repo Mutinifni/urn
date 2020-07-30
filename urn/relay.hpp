@@ -23,6 +23,13 @@ struct Library
   using time = /**/
 
 
+  struct packet
+  {
+    std::byte *data ();
+    size_t size ();
+  };
+
+
   struct client
   {
     // Start receive on client port
@@ -46,7 +53,7 @@ struct Library
 
     // Start sending \a data to associated endpoint
     // On completion, invoke relay<Library>::on_session_sent()
-    void start_send (std::byte *data, size_t length);
+    void start_send (const packet &p);
 
     // Return true if session is invalidated
     bool is_invalidated (const time &now) const;
@@ -62,6 +69,7 @@ public:
 
   using endpoint_type = typename Library::endpoint;
   using time_type = typename Library::time;
+  using packet_type = typename Library::packet;
 
   using client_type = typename Library::client;
   using peer_type = typename Library::peer;
@@ -84,12 +92,11 @@ public:
   }
 
 
-  void on_client_received (const endpoint_type &endpoint,
-    std::pair<const std::byte *, size_t> packet)
+  void on_client_received (const endpoint_type &src, const packet_type &packet)
   {
-    if (packet.second == sizeof(session_id))
+    if (packet.size() == sizeof(session_id))
     {
-      if (try_register_session(get_session_id(packet.first), endpoint))
+      if (try_register_session(get_session_id(packet.data()), src))
       {
         peer_.start_receive();
       }
@@ -98,12 +105,11 @@ public:
   }
 
 
-  void on_peer_received (const endpoint_type &,
-    std::pair<const std::byte *, size_t> packet)
+  void on_peer_received (const endpoint_type &, const packet_type &packet)
   {
-    if (packet.second >= sizeof(session_id))
+    if (packet.size() >= sizeof(session_id))
     {
-      if (auto session = find_session(get_session_id(packet.first)))
+      if (auto session = find_session(get_session_id(packet.data())))
       {
         // peer receive is restarted when sending finishes
         // (on_session_sent is invoked)
@@ -144,14 +150,17 @@ private:
 
   static session_id get_session_id (const std::byte *data)
   {
+    // htonll not used:
+    //  - tested libs/OS are all little-endian (for now)
+    //  - simplifies test code
     return *reinterpret_cast<const session_id *>(data);
   }
 
 
-  bool try_register_session (session_id id, const endpoint_type &endpoint)
+  bool try_register_session (session_id id, const endpoint_type &src)
   {
     std::lock_guard lock{sessions_mutex_};
-    return sessions_.try_emplace(id, endpoint).second;
+    return sessions_.try_emplace(id, src).second;
   }
 
 

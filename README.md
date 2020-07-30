@@ -17,7 +17,7 @@ The source tree is organised as follows:
 
     .               Root of source tree
     |- urn          Platform-independent packet relay library
-    |- bench        Benchmarks
+    |- bench        Business logic benchmarks
     |- cmake        CMake modules
     |- extern       External code as git submodules
     `- scripts      Helper scripts
