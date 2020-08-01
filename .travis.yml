@@ -5,9 +5,6 @@ group: travis_latest
 git:
   submodules: false
 
-env:
-  - CMAKE_OPTS="-Durn_libuv=OFF"
-
 jobs:
   include:
     - { name: "Linux / gcc / Debug", os: linux, dist: bionic, compiler: gcc, env: BUILD_TYPE=Debug }
@@ -42,6 +39,7 @@ install: |
   source scripts/travis_install.sh
 
 script: |
+  export CMAKE_OPTS="-Durn_libuv=OFF"
   source scripts/travis_script.sh
 
 after_success: |
