@@ -14,9 +14,6 @@ __urn_begin
 template <typename T>
 using intrusive_stack_hook = T *;
 
-template <auto Next>
-class intrusive_stack;
-
 
 /**
  * Elements of this container must provide member address \a Next that stores
@@ -48,12 +45,20 @@ class intrusive_stack;
  * auto fp = s.try_pop(); // fp == &f
  * \endcode
  */
-template <typename T, typename Hook, Hook T::*Next>
-class intrusive_stack<Next>
+template <auto Next>
+class intrusive_stack
 {
+private:
+
+  template <typename T, typename Hook, Hook T::*Member>
+  static T type_infer_helper (const intrusive_stack<Member> *);
+
+
 public:
 
-  using value_type = T;
+  using value_type = decltype(
+    type_infer_helper(static_cast<intrusive_stack<Next> *>(nullptr))
+  );
 
 
   intrusive_stack () noexcept = default;
