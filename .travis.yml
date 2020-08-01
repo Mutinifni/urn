@@ -5,6 +5,9 @@ group: travis_latest
 git:
   submodules: false
 
+env:
+  - CMAKE_OPTS="-Durn_libuv=OFF"
+
 jobs:
   include:
     - { name: "Linux / gcc / Debug", os: linux, dist: bionic, compiler: gcc, env: BUILD_TYPE=Debug }
