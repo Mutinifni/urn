@@ -30,6 +30,7 @@ case "${TRAVIS_OS_NAME}-${CC}" in
     ;;
 esac
 
+echo "*** [${CMAKE_OPTS}]"
 cmake . -G "${CMAKE_BUILD_GENERATOR}" -DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${CMAKE_OPTS}
 cmake --build . --config ${BUILD_TYPE}
 
