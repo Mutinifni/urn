@@ -4,6 +4,7 @@
  * \file libuv/relay.hpp
  */
 
+#include <urn/intrusive_stack.hpp>
 #include <urn/relay.hpp>
 #include <uv.h>
 #include <cstdlib>
@@ -65,6 +66,8 @@ struct libuv //{{{1
 struct libuv::packet //{{{1
   : uv_buf_t
 {
+  packet () = default;
+
   packet (const uv_buf_t &buf, size_t len) noexcept
     : uv_buf_t(uv_buf_init(buf.base, (int)len))
   { }
@@ -140,30 +143,18 @@ public:
     return uv_run(uv_default_loop(), UV_RUN_DEFAULT);
   }
 
-  // TODO: pool allocator
-  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
-  {
-    buf->len = 1024;
-    buf->base = static_cast<char *>(malloc(buf->len));
-  }
-
-  static void free_buffer (const uv_buf_t *buf) noexcept
-  {
-    free(buf->base);
-  }
-
   void on_client_received (
     const sockaddr *src,
     size_t nread,
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread || ((flags & UV_UDP_PARTIAL) == UV_UDP_PARTIAL))
+    if (nread || ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
     {
       libuv::packet packet(*buf, nread);
       logic_.on_client_received(*src, packet);
     }
-    free_buffer(buf);
+    release_buffer(buf);
   }
 
   void on_peer_received (
@@ -172,7 +163,7 @@ public:
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread || ((flags & UV_UDP_PARTIAL) == UV_UDP_PARTIAL))
+    if (nread || ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
     {
       libuv::packet packet(*buf, nread);
       if (logic_.on_peer_received(*src, std::move(packet)))
@@ -180,18 +171,27 @@ public:
         return;
       }
     }
-    free_buffer(buf);
+    release_buffer(buf);
   }
 
   void on_session_sent (libuv::session &session, const libuv::packet &packet)
     noexcept
   {
     logic_.on_session_sent(session, packet);
+    release_buffer(&packet);
   }
 
   const sockaddr *alloc_address () const noexcept
   {
     return &alloc_address_;
+  }
+
+  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
+  {
+    auto relay = static_cast<urn_libuv::relay *>(uv_default_loop()->data);
+    auto block = relay->allocator_.alloc();
+    buf->base = block->data;
+    buf->len = sizeof(block->data);
   }
 
 
@@ -201,6 +201,58 @@ private:
   libuv::peer peer_;
   urn::relay<libuv, false> logic_;
   sockaddr alloc_address_;
+
+  struct block_pool
+  {
+    struct block
+    {
+      union
+      {
+        struct
+        {
+          uv_udp_send_t req{};
+          libuv::packet packet{};
+          libuv::session *session{};
+        } session_send{};
+      } ctl{};
+      urn::intrusive_stack_hook<block> next{};
+      char data[8192];
+    };
+    urn::intrusive_stack<&block::next> pool_{};
+
+    block *alloc () noexcept
+    {
+      auto b = pool_.try_pop();
+      if (!b)
+      {
+        b = new block;
+        if (!b)
+        {
+          die_on_error(UV_ENOMEM, "allocator::alloc");
+        }
+      }
+      return b;
+    }
+
+    void release (block *b) noexcept
+    {
+      pool_.push(b);
+    }
+
+    static block *base_to_block_ptr (char *base) noexcept
+    {
+      return reinterpret_cast<block *>(
+        base + sizeof(block::data) - sizeof(block)
+      );
+    }
+  } allocator_{};
+
+  void release_buffer (const uv_buf_t *buf) noexcept
+  {
+    allocator_.release(block_pool::base_to_block_ptr(buf->base));
+  }
+
+  friend struct libuv::session;
 };
 
 

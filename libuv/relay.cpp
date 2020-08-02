@@ -74,31 +74,23 @@ libuv::session::session (const endpoint &dest) noexcept
 
 void libuv::session::start_send (packet &&p) noexcept
 {
-  // TODO: pool allocator
+  auto block = urn_libuv::relay::block_pool::base_to_block_ptr(p.base);
+  block->ctl.session_send.session = this;
+  block->ctl.session_send.packet = std::move(p);
 
-  struct udp_fwd_req_t
-  {
-    uv_udp_send_t req;
-    session *s;
-    packet p;
-  };
-
-  auto req = static_cast<udp_fwd_req_t *>(malloc(sizeof(udp_fwd_req_t)));
-  req->s = this;
-  req->p = std::move(p);
-
-  libuv_call(uv_udp_send, reinterpret_cast<uv_udp_send_t *>(req),
+  libuv_call(uv_udp_send, &block->ctl.session_send.req,
     &socket,
-    &req->p, 1,
+    &block->ctl.session_send.packet, 1,
     nullptr,
     [](uv_udp_send_t *handle, int status) noexcept
     {
       die_on_error(status, "session: uv_udp_send");
       auto relay = static_cast<urn_libuv::relay *>(uv_default_loop()->data);
-      auto req = reinterpret_cast<udp_fwd_req_t *>(handle);
-      relay->on_session_sent(*req->s, req->p);
-      relay->free_buffer(&req->p);
-      free(req);
+      auto block = reinterpret_cast<urn_libuv::relay::block_pool::block *>(handle);
+      relay->on_session_sent(
+        *block->ctl.session_send.session,
+        block->ctl.session_send.packet
+      );
     }
   );
 }
