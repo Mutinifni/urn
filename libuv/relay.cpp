@@ -1,6 +1,4 @@
 #include <libuv/relay.hpp>
-#include <cstdlib>
-#include <iostream>
 
 
 namespace urn_libuv {
@@ -8,44 +6,21 @@ namespace urn_libuv {
 
 namespace {
 
-constexpr bool log_calls = false;
-
-inline void die_on_error (int code, const char *fn)
-{
-  if constexpr (log_calls)
-  {
-    std::cout << fn << '=' << code << '\n';
-  }
-
-  if (code < 0)
-  {
-    std::cout
-      << fn
-      << ": "
-      << uv_strerror(code)
-      << " ("
-      << uv_err_name(code)
-      << ")\n";
-    abort();
-  }
-}
-
-#define call(F, ...) die_on_error(F(__VA_ARGS__), #F)
-
 
 void start_udp_listener (uv_udp_t &socket, uint16_t port, uv_udp_recv_cb cb)
+  noexcept
 {
-  call(uv_udp_init, uv_default_loop(), &socket);
+  libuv_call(uv_udp_init, uv_default_loop(), &socket);
 
   sockaddr_in addr;
-  call(uv_ip4_addr, "0.0.0.0", port, &addr);
+  libuv_call(uv_ip4_addr, "0.0.0.0", port, &addr);
 
-  call(uv_udp_bind, &socket,
+  libuv_call(uv_udp_bind, &socket,
     reinterpret_cast<const sockaddr *>(&addr),
     UV_UDP_REUSEADDR
   );
 
-  call(uv_udp_recv_start, &socket, &urn_libuv::relay::alloc_buffer, cb);
+  libuv_call(uv_udp_recv_start, &socket, &urn_libuv::relay::alloc_buffer, cb);
 }
 
 
@@ -88,14 +63,12 @@ libuv::peer::peer (const config &conf) noexcept
 
 libuv::session::session (const endpoint &dest) noexcept
 {
-  call(uv_udp_init, uv_default_loop(), &socket);
+  auto loop = uv_default_loop();
+  auto relay = static_cast<urn_libuv::relay *>(loop->data);
 
-  call(uv_udp_bind, &socket,
-    static_cast<urn_libuv::relay *>(uv_default_loop()->data)->alloc_address(),
-    UV_UDP_REUSEADDR
-  );
-
-  call(uv_udp_connect, &socket, &dest);
+  libuv_call(uv_udp_init, loop, &socket);
+  libuv_call(uv_udp_bind, &socket, relay->alloc_address(), UV_UDP_REUSEADDR);
+  libuv_call(uv_udp_connect, &socket, &dest);
 }
 
 
@@ -114,7 +87,7 @@ void libuv::session::start_send (packet &&p) noexcept
   req->s = this;
   req->p = std::move(p);
 
-  call(uv_udp_send, reinterpret_cast<uv_udp_send_t *>(req),
+  libuv_call(uv_udp_send, reinterpret_cast<uv_udp_send_t *>(req),
     &socket,
     &req->p, 1,
     nullptr,
@@ -128,16 +101,6 @@ void libuv::session::start_send (packet &&p) noexcept
       free(req);
     }
   );
-}
-
-
-relay::relay (const config &conf) noexcept
-  : client_{conf}
-  , peer_{conf}
-  , logic_{client_, peer_}
-  , alloc_address_{}
-{
-  call(uv_ip4_addr, "0.0.0.0", conf.client.port, (sockaddr_in *)&alloc_address_);
 }
 
 
