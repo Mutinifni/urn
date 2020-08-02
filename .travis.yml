@@ -39,6 +39,7 @@ install: |
   source scripts/travis_install.sh
 
 script: |
+  export CMAKE_OPTS="-Durn_libuv=OFF"
   source scripts/travis_script.sh
 
 after_success: |

@@ -53,7 +53,7 @@ struct Library
 
     // Start sending \a data to associated endpoint
     // On completion, invoke relay<Library>::on_session_sent()
-    void start_send (const packet &p);
+    void start_send (packet &&p);
 
     // Return true if session is invalidated
     bool is_invalidated (const time &now) const;
@@ -105,7 +105,7 @@ public:
   }
 
 
-  void on_peer_received (const endpoint_type &, const packet_type &packet)
+  bool on_peer_received (const endpoint_type &, packet_type &&packet)
   {
     if (packet.size() >= sizeof(session_id))
     {
@@ -113,15 +113,16 @@ public:
       {
         // peer receive is restarted when sending finishes
         // (on_session_sent is invoked)
-        session->start_send(packet);
-        return;
+        session->start_send(std::move(packet));
+        return true;
       }
     }
     peer_.start_receive();
+    return false;
   }
 
 
-  void on_session_sent ()
+  void on_session_sent (session_type &, const packet_type &)
   {
     peer_.start_receive();
   }

@@ -90,7 +90,7 @@ struct test_lib
     }
 
 
-    void start_send (const packet &) noexcept
+    void start_send (packet &&) noexcept
     {
       start_send_invoked = true;
     }
@@ -207,7 +207,7 @@ TEMPLATE_TEST_CASE("relay", "",
   SECTION("on_peer_received: invalid data")
   {
     char data[] = { 'a' };
-    relay.on_peer_received(a_src, data);
+    CHECK_FALSE(relay.on_peer_received(a_src, data));
     CHECK_FALSE(client.is_start_recv_invoked());
     CHECK(peer.is_start_recv_invoked());
   }
@@ -229,7 +229,7 @@ TEMPLATE_TEST_CASE("relay", "",
     // send to invalid registration
     {
       uint64_t data[] = { b_id, 100 };
-      relay.on_peer_received(a_src, data);
+      CHECK_FALSE(relay.on_peer_received(a_src, data));
       CHECK(peer.is_start_recv_invoked());
       CHECK_FALSE(session->is_start_send_invoked());
     }
@@ -252,12 +252,12 @@ TEMPLATE_TEST_CASE("relay", "",
     // forward
     {
       uint64_t data[] = { a_id, 100 };
-      relay.on_peer_received(a_src, data);
+      CHECK(relay.on_peer_received(a_src, data));
       CHECK(session->is_start_send_invoked());
 
       // new receive is started only after session start_send has finished
       CHECK_FALSE(peer.is_start_recv_invoked());
-      relay.on_session_sent();
+      relay.on_session_sent(*session, data);
       CHECK(peer.is_start_recv_invoked());
     }
   }
@@ -290,11 +290,11 @@ TEMPLATE_TEST_CASE("relay", "",
     // forward
     {
       uint64_t data[] = { a_id, 100 };
-      relay.on_peer_received(a_src, data);
+      CHECK(relay.on_peer_received(a_src, data));
       CHECK(a->is_start_send_invoked());
       CHECK_FALSE(b->is_start_send_invoked());
 
-      relay.on_session_sent();
+      relay.on_session_sent(*a, data);
       CHECK(peer.is_start_recv_invoked());
     }
   }
