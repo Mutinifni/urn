@@ -7,6 +7,7 @@
 
 #include <urn/__bits/lib.hpp>
 #include <urn/mutex.hpp>
+#include <iostream>
 #include <unordered_map>
 
 
@@ -18,9 +19,6 @@ struct Library
 {
   // Source/destination endpoint
   using endpoint = /**/
-
-  // Time point
-  using time = /**/
 
 
   struct packet
@@ -54,9 +52,6 @@ struct Library
     // Start sending \a data to associated endpoint
     // On completion, invoke relay<Library>::on_session_sent()
     void start_send (packet &&p);
-
-    // Return true if session is invalidated
-    bool is_invalidated (const time &now) const;
   };
 };
 #endif
@@ -68,7 +63,6 @@ class relay
 public:
 
   using endpoint_type = typename Library::endpoint;
-  using time_type = typename Library::time;
   using packet_type = typename Library::packet;
 
   using client_type = typename Library::client;
@@ -86,14 +80,22 @@ public:
   { }
 
 
-  void tick (const time_type &now)
+  void print_statistics (const std::chrono::seconds &interval)
   {
-    erase_invalidated_sessions(now);
+    auto [in_bytes, out_bytes] = load_io_statistics();
+    auto [in_bps, in_unit] = bits_per_sec(in_bytes, interval);
+    auto [out_bps, out_unit] = bits_per_sec(out_bytes, interval);
+    std::cout
+      << "in: " << in_bps << in_unit
+      << " / "
+      << "out: " << out_bps << out_unit
+      << '\n';
   }
 
 
   void on_client_received (const endpoint_type &src, const packet_type &packet)
   {
+    update_io_statistics(stats_.in.bytes, packet.size());
     if (packet.size() == sizeof(session_id))
     {
       if (try_register_session(get_session_id(packet.data()), src))
@@ -107,6 +109,7 @@ public:
 
   bool on_peer_received (const endpoint_type &, packet_type &&packet)
   {
+    update_io_statistics(stats_.in.bytes, packet.size());
     if (packet.size() >= sizeof(session_id))
     {
       if (auto session = find_session(get_session_id(packet.data())))
@@ -122,8 +125,9 @@ public:
   }
 
 
-  void on_session_sent (session_type &, const packet_type &)
+  void on_session_sent (session_type &, const packet_type &packet)
   {
+    update_io_statistics(stats_.out.bytes, packet.size());
     peer_.start_receive();
   }
 
@@ -131,7 +135,7 @@ public:
   session_type *find_session (session_id id)
   {
     std::lock_guard lock{sessions_mutex_};
-    if (auto it = sessions_.find(id); it != sessions_.end())
+    if (auto it = sessions_.find(id);  it != sessions_.end())
     {
       return &it->second;
     }
@@ -147,6 +151,15 @@ private:
   using session_map = std::unordered_map<session_id, session_type>;
   session_map sessions_{};
   mutable mutex_type sessions_mutex_{};
+
+  struct
+  {
+    struct
+    {
+      size_t bytes;
+    } in{}, out{};
+  } stats_{};
+  mutable mutex_type stats_mutex_{};
 
 
   static session_id get_session_id (const std::byte *data)
@@ -165,20 +178,38 @@ private:
   }
 
 
-  void erase_invalidated_sessions (const time_type &now)
+  void update_io_statistics (size_t &var, size_t bytes) noexcept
   {
-    std::lock_guard lock{sessions_mutex_};
-    for (auto it = sessions_.begin(), end = sessions_.end();  it != end;  )
+    std::lock_guard lock{stats_mutex_};
+    var += bytes;
+  }
+
+
+  std::pair<size_t, size_t> load_io_statistics () noexcept
+  {
+    std::lock_guard lock{stats_mutex_};
+    return
     {
-      if (it->second.is_invalidated(now))
-      {
-        it = sessions_.erase(it);
-      }
-      else
-      {
-        ++it;
-      }
+      std::exchange(stats_.in.bytes, 0),
+      std::exchange(stats_.out.bytes, 0)
+    };
+  }
+
+
+  static constexpr std::pair<size_t, const char *> bits_per_sec (
+    size_t bytes, const std::chrono::seconds &interval) noexcept
+  {
+    constexpr const char *units[] = { "bps", "Kbps", "Mbps", "Gbps", };
+    auto unit = std::cbegin(units);
+
+    auto bits_per_sec = 8 * (bytes / interval.count());
+    while (bits_per_sec > 1000 && (unit + 1) != std::cend(units))
+    {
+      bits_per_sec /= 1000;
+      unit++;
     }
+
+    return { bits_per_sec, *unit };
   }
 };
 

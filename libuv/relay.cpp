@@ -96,4 +96,35 @@ void libuv::session::start_send (packet &&p) noexcept
 }
 
 
+relay::relay (const config &conf) noexcept
+  : client_{conf}
+  , peer_{conf}
+  , logic_{client_, peer_}
+  , alloc_address_{}
+  , statistics_timer_{}
+  , statistics_interval_{conf.statistics_print_interval}
+{
+  auto loop = uv_default_loop();
+  loop->data = this;
+
+  libuv_call(uv_ip4_addr,
+    "0.0.0.0", conf.client.port,
+    (sockaddr_in *)&alloc_address_
+  );
+
+  libuv_call(uv_timer_init, loop, &statistics_timer_);
+  statistics_timer_.data = this;
+
+  std::chrono::milliseconds interval = statistics_interval_;
+  libuv_call(uv_timer_start, &statistics_timer_,
+    [](uv_timer_t *timer)
+    {
+      static_cast<relay *>(timer->data)->on_statistics_tick();
+    },
+    0,
+    interval.count()
+  );
+}
+
+
 } // namespace urn_libuv

@@ -7,6 +7,7 @@
 #include <urn/intrusive_stack.hpp>
 #include <urn/relay.hpp>
 #include <uv.h>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 
@@ -37,16 +38,16 @@ inline void die_on_error (int code, const char *fn)
 
 struct config //{{{1
 {
+  static constexpr std::chrono::seconds statistics_print_interval{5};
+
   struct
   {
     uint16_t port = 3478;
-    size_t reads = 10;
   } client;
 
   struct
   {
     uint16_t port = 3479;
-    size_t reads = 10;
   } peer;
 };
 
@@ -54,8 +55,6 @@ struct config //{{{1
 struct libuv //{{{1
 {
   using endpoint = sockaddr;
-  using time = decltype(uv_hrtime());
-
   struct packet;
   struct client;
   struct peer;
@@ -113,11 +112,6 @@ struct libuv::session //{{{1
   session (const endpoint &dest) noexcept;
 
   void start_send (packet &&p) noexcept;
-
-  bool is_invalidated (time) const noexcept
-  {
-    return false;
-  }
 };
 
 
@@ -125,18 +119,7 @@ class relay //{{{1
 {
 public:
 
-  relay (const config &conf) noexcept
-    : client_{conf}
-    , peer_{conf}
-    , logic_{client_, peer_}
-    , alloc_address_{}
-  {
-    libuv_call(uv_ip4_addr,
-      "0.0.0.0", conf.client.port,
-      (sockaddr_in *)&alloc_address_
-    );
-    uv_default_loop()->data = this;
-  }
+  relay (const config &conf) noexcept;
 
   int run () noexcept
   {
@@ -181,6 +164,11 @@ public:
     release_buffer(&packet);
   }
 
+  void on_statistics_tick () noexcept
+  {
+    logic_.print_statistics(statistics_interval_);
+  }
+
   const sockaddr *alloc_address () const noexcept
   {
     return &alloc_address_;
@@ -201,6 +189,8 @@ private:
   libuv::peer peer_;
   urn::relay<libuv, false> logic_;
   sockaddr alloc_address_;
+  uv_timer_t statistics_timer_;
+  const std::chrono::seconds statistics_interval_;
 
   struct block_pool
   {
