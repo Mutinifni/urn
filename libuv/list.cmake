@@ -26,6 +26,8 @@ list(APPEND urn_experiments libuv)
 
 list(APPEND urn_libuv_sources
   libuv/main.cpp
+  libuv/relay.hpp
+  libuv/relay.cpp
 )
 
 list(APPEND urn_libuv_libs ${libuv_LIBRARY})
