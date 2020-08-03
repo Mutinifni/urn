@@ -17,8 +17,8 @@ library that can be separately tested and benchmarked.
 
 For testing different I/O and/or threading models, create new experiment
 executable sub-project that provides syscall wrappers and invokes business
-logic hooks. Business logic is implemented by class `urn::relay<Library,
-MultiThreaded>`.
+logic hooks. Business logic is implemented by class [`urn::relay<Library,
+MultiThreaded>`](https://github.com/svens/urn/blob/92a415c59cb221159f134a3629ee90664ef5fa2e/urn/relay.hpp#L19).
 
 Library should provide following API:
 ```cpp
