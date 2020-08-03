@@ -3,6 +3,8 @@
 /**
  * \file urn/relay.hpp
  * UDP relay business logic
+ *
+ * See README.md for required Library API
  */
 
 #include <urn/__bits/lib.hpp>
@@ -12,49 +14,6 @@
 
 
 __urn_begin
-
-
-#if 0
-struct Library
-{
-  // Source/destination endpoint
-  using endpoint = /**/
-
-
-  struct packet
-  {
-    std::byte *data ();
-    size_t size ();
-  };
-
-
-  struct client
-  {
-    // Start receive on client port
-    // On completion, invoke relay<Library>::on_client_received()
-    void start_receive ();
-  };
-
-
-  struct peer
-  {
-    // Start receive on peer port
-    // On completion, invoke relay<Library>::on_peer_received()
-    void start_receive ();
-  };
-
-
-  struct session
-  {
-    // Construct new session with associated endpoint \a src
-    session (const endpoint &src);
-
-    // Start sending \a data to associated endpoint
-    // On completion, invoke relay<Library>::on_session_sent()
-    void start_send (packet &&p);
-  };
-};
-#endif
 
 
 template <typename Library, bool MultiThreaded = false>
