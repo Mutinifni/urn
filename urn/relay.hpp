@@ -41,20 +41,20 @@ public:
 
   void print_statistics (const std::chrono::seconds &interval)
   {
-    auto [in_bytes, out_bytes] = load_io_statistics();
+    auto [in_packets, in_bytes, out_packets, out_bytes] = load_io_statistics();
     auto [in_bps, in_unit] = bits_per_sec(in_bytes, interval);
     auto [out_bps, out_unit] = bits_per_sec(out_bytes, interval);
     std::cout
-      << "in: " << in_bps << in_unit
-      << " / "
-      << "out: " << out_bps << out_unit
+      << "in: " << in_packets << '/' << in_bps << in_unit
+      << " | "
+      << "out: " << out_packets << '/' << out_bps << out_unit
       << '\n';
   }
 
 
   void on_client_received (const endpoint_type &src, const packet_type &packet)
   {
-    update_io_statistics(stats_.in.bytes, packet.size());
+    update_io_statistics(stats_.in.packets, stats_.in.bytes, packet.size());
     if (packet.size() == sizeof(session_id))
     {
       if (try_register_session(get_session_id(packet.data()), src))
@@ -68,7 +68,7 @@ public:
 
   bool on_peer_received (const endpoint_type &, packet_type &&packet)
   {
-    update_io_statistics(stats_.in.bytes, packet.size());
+    update_io_statistics(stats_.in.packets, stats_.in.bytes, packet.size());
     if (packet.size() >= sizeof(session_id))
     {
       if (auto session = find_session(get_session_id(packet.data())))
@@ -86,7 +86,7 @@ public:
 
   void on_session_sent (session_type &, const packet_type &packet)
   {
-    update_io_statistics(stats_.out.bytes, packet.size());
+    update_io_statistics(stats_.out.packets, stats_.out.bytes, packet.size());
     peer_.start_receive();
   }
 
@@ -115,7 +115,7 @@ private:
   {
     struct
     {
-      size_t bytes;
+      size_t packets, bytes;
     } in{}, out{};
   } stats_{};
   mutable mutex_type stats_mutex_{};
@@ -137,19 +137,23 @@ private:
   }
 
 
-  void update_io_statistics (size_t &var, size_t bytes) noexcept
+  void update_io_statistics (size_t &count_var, size_t &size_var, size_t bytes)
+    noexcept
   {
     std::lock_guard lock{stats_mutex_};
-    var += bytes;
+    size_var += bytes;
+    count_var++;
   }
 
 
-  std::pair<size_t, size_t> load_io_statistics () noexcept
+  std::tuple<size_t, size_t, size_t, size_t> load_io_statistics () noexcept
   {
     std::lock_guard lock{stats_mutex_};
     return
     {
+      std::exchange(stats_.in.packets, 0),
       std::exchange(stats_.in.bytes, 0),
+      std::exchange(stats_.out.packets, 0),
       std::exchange(stats_.out.bytes, 0)
     };
   }
