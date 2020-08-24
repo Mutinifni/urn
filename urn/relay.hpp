@@ -44,6 +44,8 @@ public:
     auto [in_packets, in_bytes, out_packets, out_bytes] = load_io_statistics();
     auto [in_bps, in_unit] = bits_per_sec(in_bytes, interval);
     auto [out_bps, out_unit] = bits_per_sec(out_bytes, interval);
+    in_packets /= interval.count();
+    out_packets /= interval.count();
     std::cout
       << "in: " << in_packets << '/' << in_bps << in_unit
       << " | "
