@@ -1,7 +1,61 @@
 #include <libuv/relay.hpp>
+#include <string>
+#include <vector>
 
 
 namespace urn_libuv {
+
+
+namespace {
+
+template <typename T>
+void parse_numeric_argument (const std::string &name,
+  const std::string &value,
+  T &result)
+{
+  try
+  {
+    auto ull = std::stoull(value);
+    if (ull <= std::numeric_limits<T>::max())
+    {
+      result = ull;
+      return;
+    }
+    throw std::runtime_error(name + ": out of range (" + value + ')');
+  }
+  catch (const std::invalid_argument &e)
+  {
+    throw std::runtime_error(name + ": invalid argument (" + value + ')');
+  }
+}
+
+} // namespace
+
+
+config::config (int argc, const char *argv[])
+{
+  std::vector<std::string> args{argv + 1, argv + argc};
+  for (auto i = 0u;  i < args.size();  ++i)
+  {
+    if (args[i] == "--client.port")
+    {
+      parse_numeric_argument("client.port", args.at(++i), client.port);
+    }
+    else if (args[i] == "--peer.port")
+    {
+      parse_numeric_argument("peer.port", args.at(++i), peer.port);
+    }
+    else
+    {
+      throw std::runtime_error("invalid flag: '" + args[i] + '\'');
+    }
+  }
+
+  std::cout
+    << "client.port = " << client.port
+    << "\npeer.port = " << peer.port
+    << '\n';
+}
 
 
 namespace {
@@ -97,25 +151,25 @@ void libuv::session::start_send (packet &&p) noexcept
 
 
 relay::relay (const config &conf) noexcept
-  : client_{conf}
-  , peer_{conf}
+  : config_{conf}
+  , client_{config_}
+  , peer_{config_}
   , logic_{client_, peer_}
   , alloc_address_{}
   , statistics_timer_{}
-  , statistics_interval_{conf.statistics_print_interval}
 {
   auto loop = uv_default_loop();
   loop->data = this;
 
   libuv_call(uv_ip4_addr,
-    "0.0.0.0", conf.client.port,
+    "0.0.0.0", config_.client.port,
     (sockaddr_in *)&alloc_address_
   );
 
   libuv_call(uv_timer_init, loop, &statistics_timer_);
   statistics_timer_.data = this;
 
-  std::chrono::milliseconds interval = statistics_interval_;
+  std::chrono::milliseconds interval = config_.statistics_print_interval;
   libuv_call(uv_timer_start, &statistics_timer_,
     [](uv_timer_t *timer)
     {

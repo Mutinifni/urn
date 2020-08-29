@@ -43,12 +43,14 @@ struct config //{{{1
   struct
   {
     uint16_t port = 3478;
-  } client;
+  } client{};
 
   struct
   {
     uint16_t port = 3479;
-  } peer;
+  } peer{};
+
+  config (int argc, const char *argv[]);
 };
 
 
@@ -166,7 +168,7 @@ public:
 
   void on_statistics_tick () noexcept
   {
-    logic_.print_statistics(statistics_interval_);
+    logic_.print_statistics(config_.statistics_print_interval);
   }
 
   const sockaddr *alloc_address () const noexcept
@@ -185,12 +187,12 @@ public:
 
 private:
 
+  const config config_;
   libuv::client client_;
   libuv::peer peer_;
   urn::relay<libuv, false> logic_;
   sockaddr alloc_address_;
   uv_timer_t statistics_timer_;
-  const std::chrono::seconds statistics_interval_;
 
   struct block_pool
   {
