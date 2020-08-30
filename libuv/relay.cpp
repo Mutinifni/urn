@@ -1,12 +1,12 @@
 #include <libuv/relay.hpp>
 #include <string>
-#include <vector>
 
 
 namespace urn_libuv {
 
 
 namespace {
+
 
 template <typename T>
 void parse_numeric_argument (const std::string &name,
@@ -29,15 +29,20 @@ void parse_numeric_argument (const std::string &name,
   }
 }
 
+
 } // namespace
 
 
 config::config (int argc, const char *argv[])
 {
-  std::vector<std::string> args{argv + 1, argv + argc};
+  std::deque<std::string> args{argv + 1, argv + argc};
   for (auto i = 0u;  i < args.size();  ++i)
   {
-    if (args[i] == "--client.port")
+    if (args[i] == "--threads")
+    {
+      parse_numeric_argument("threads", args.at(++i), threads);
+    }
+    else if (args[i] == "--client.port")
     {
       parse_numeric_argument("client.port", args.at(++i), client.port);
     }
@@ -51,84 +56,35 @@ config::config (int argc, const char *argv[])
     }
   }
 
+  if (!threads)
+  {
+    threads = 1;
+  }
+
   std::cout
-    << "client.port = " << client.port
+    << "threads = " << threads
+    << "\nclient.port = " << client.port
     << "\npeer.port = " << peer.port
     << '\n';
 }
 
 
-namespace {
-
-
-void start_udp_listener (uv_udp_t &socket, uint16_t port, uv_udp_recv_cb cb)
-  noexcept
-{
-  libuv_call(uv_udp_init, uv_default_loop(), &socket);
-
-  sockaddr_in addr;
-  libuv_call(uv_ip4_addr, "0.0.0.0", port, &addr);
-
-  libuv_call(uv_udp_bind, &socket,
-    reinterpret_cast<const sockaddr *>(&addr),
-    UV_UDP_REUSEADDR
-  );
-
-  libuv_call(uv_udp_recv_start, &socket, &urn_libuv::relay::alloc_buffer, cb);
-}
-
-
-} // namespace
-
-
-libuv::client::client (const config &conf) noexcept
-{
-  start_udp_listener(socket, conf.client.port,
-    [](uv_udp_t *handle,
-      ssize_t nread,
-      const uv_buf_t *buf,
-      const sockaddr *src,
-      unsigned flags) noexcept
-    {
-      die_on_error((int)nread, "client: uv_udp_recv_start");
-      auto relay = static_cast<urn_libuv::relay *>(handle->loop->data);
-      relay->on_client_received(src, nread, buf, flags);
-    }
-  );
-}
-
-
-libuv::peer::peer (const config &conf) noexcept
-{
-  start_udp_listener(socket, conf.peer.port,
-    [](uv_udp_t *handle,
-      ssize_t nread,
-      const uv_buf_t *buf,
-      const sockaddr *src,
-      unsigned flags) noexcept
-    {
-      die_on_error((int)nread, "peer: uv_udp_recv_start");
-      auto relay = static_cast<urn_libuv::relay *>(handle->loop->data);
-      relay->on_peer_received(src, nread, buf, flags);
-    }
-  );
-}
-
-
 libuv::session::session (const endpoint &dest) noexcept
 {
-  auto loop = uv_default_loop();
-  auto relay = static_cast<urn_libuv::relay *>(loop->data);
-
-  libuv_call(uv_udp_init, loop, &socket);
-  libuv_call(uv_udp_bind, &socket, relay->alloc_address(), UV_UDP_REUSEADDR);
+  auto thread = relay::this_thread();
+  libuv_call(uv_udp_init, &thread->loop, &socket);
+  libuv_call(uv_udp_bind,
+    &socket,
+    &thread->owner.alloc_address_,
+    UV_UDP_REUSEADDR
+  );
   libuv_call(uv_udp_connect, &socket, &dest);
 }
 
 
 void libuv::session::start_send (packet &&p) noexcept
 {
-  auto block = urn_libuv::relay::block_pool::base_to_block_ptr(p.base);
+  auto block = urn_libuv::relay::block_pool::to_block_ptr(p.base);
   block->ctl.session_send.session = this;
   block->ctl.session_send.packet = std::move(p);
 
@@ -136,12 +92,11 @@ void libuv::session::start_send (packet &&p) noexcept
     &socket,
     &block->ctl.session_send.packet, 1,
     nullptr,
-    [](uv_udp_send_t *handle, int status) noexcept
+    [](uv_udp_send_t *request, int status) noexcept
     {
       die_on_error(status, "session: uv_udp_send");
-      auto relay = static_cast<urn_libuv::relay *>(uv_default_loop()->data);
-      auto block = reinterpret_cast<urn_libuv::relay::block_pool::block *>(handle);
-      relay->on_session_sent(
+      auto block = reinterpret_cast<urn_libuv::relay::block_pool::block *>(request);
+      relay::this_thread()->owner.on_session_sent(
         *block->ctl.session_send.session,
         block->ctl.session_send.packet
       );
@@ -150,34 +105,141 @@ void libuv::session::start_send (packet &&p) noexcept
 }
 
 
+namespace {
+
+
+thread_local uv_loop_t *thread_loop = nullptr;
+
+
+sockaddr make_ip4_addr_any_with_port (uint16_t port)
+{
+  sockaddr a;
+  libuv_call(uv_ip4_addr, "0.0.0.0", port, (sockaddr_in *)&a);
+  return a;
+}
+
+
+void start_udp_listener (uv_loop_t &loop,
+  uv_udp_t &socket,
+  uint16_t port,
+  uv_udp_recv_cb cb) noexcept
+{
+  libuv_call(uv_udp_init, &loop, &socket);
+
+  auto addr = make_ip4_addr_any_with_port(port);
+  libuv_call(uv_udp_bind, &socket,
+    reinterpret_cast<const sockaddr *>(&addr),
+    UV_UDP_REUSEADDR
+  );
+
+  libuv_call(uv_udp_recv_start, &socket, &relay::alloc_buffer, cb);
+}
+
+
+} // namespace
+
+
+std::thread relay::thread::start ()
+{
+  libuv_call(uv_loop_init, &loop);
+  loop.data = this;
+
+  start_udp_listener(loop, client, owner.config_.client.port,
+    [](uv_udp_t *handle,
+      ssize_t nread,
+      const uv_buf_t *buf,
+      const sockaddr *src,
+      unsigned flags) noexcept
+    {
+      die_on_error((int)nread, "client: uv_udp_recv_start");
+      auto self = static_cast<relay::thread *>(handle->loop->data);
+      self->owner.on_client_received(src, nread, buf, flags);
+    }
+  );
+
+  start_udp_listener(loop, peer, owner.config_.peer.port,
+    [](uv_udp_t *handle,
+      ssize_t nread,
+      const uv_buf_t *buf,
+      const sockaddr *src,
+      unsigned flags) noexcept
+    {
+      die_on_error((int)nread, "peer: uv_udp_recv_start");
+      auto self = static_cast<relay::thread *>(handle->loop->data);
+      self->owner.on_peer_received(src, nread, buf, flags);
+    }
+  );
+
+  return std::thread(
+    [this]()
+    {
+      thread_loop = &loop;
+      uv_run(&loop, UV_RUN_DEFAULT);
+    }
+  );
+}
+
+
 relay::relay (const config &conf) noexcept
   : config_{conf}
-  , client_{config_}
-  , peer_{config_}
-  , logic_{client_, peer_}
-  , alloc_address_{}
-  , statistics_timer_{}
+  , alloc_address_{make_ip4_addr_any_with_port(config_.client.port)}
+{ }
+
+
+int relay::run () noexcept
 {
   auto loop = uv_default_loop();
   loop->data = this;
 
-  libuv_call(uv_ip4_addr,
-    "0.0.0.0", config_.client.port,
-    (sockaddr_in *)&alloc_address_
-  );
-
-  libuv_call(uv_timer_init, loop, &statistics_timer_);
-  statistics_timer_.data = this;
-
-  std::chrono::milliseconds interval = config_.statistics_print_interval;
-  libuv_call(uv_timer_start, &statistics_timer_,
+  uv_timer_t statistics_timer;
+  libuv_call(uv_timer_init, loop, &statistics_timer);
+  statistics_timer.data = this;
+  libuv_call(uv_timer_start, &statistics_timer,
     [](uv_timer_t *timer)
     {
       static_cast<relay *>(timer->data)->on_statistics_tick();
     },
     0,
-    interval.count()
+    std::chrono::milliseconds{config_.statistics_print_interval}.count()
   );
+
+  std::deque<std::thread> sys_threads;
+  for (auto i = 0;  i < config_.threads;  ++i)
+  {
+    sys_threads.emplace_back(
+      threads_.emplace_back(*this).start()
+    );
+  }
+
+  auto exit_code = uv_run(loop, UV_RUN_DEFAULT);
+
+  // never reached actually, loop above is infinite
+  for (auto &thread: sys_threads)
+  {
+    thread.join();
+  }
+
+  return exit_code;
+}
+
+
+relay::thread *relay::this_thread () noexcept
+{
+  return static_cast<relay::thread *>(thread_loop->data);
+}
+
+
+void relay::alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
+{
+  auto block = this_thread()->blocks.alloc();
+  buf->base = block->data;
+  buf->len = sizeof(block->data);
+}
+
+
+void relay::release_buffer (const uv_buf_t *buf) noexcept
+{
+  this_thread()->blocks.release(block_pool::to_block_ptr(buf->base));
 }
 
 

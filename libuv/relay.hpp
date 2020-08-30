@@ -2,6 +2,10 @@
 
 /**
  * \file libuv/relay.hpp
+ *
+ * Notes:
+ *  - No proper termination / cleanup
+ *  - No maintenance invocations to relay
  */
 
 #include <urn/intrusive_stack.hpp>
@@ -9,10 +13,22 @@
 #include <uv.h>
 #include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <iostream>
+#include <thread>
 
 
 // TODO: http://docs.libuv.org/en/v1.x/udp.html#c.uv_udp_using_recvmmsg
+
+//
+// Linux:
+//  - SO_REUSEPORT
+//  - ethtool -n eth0 rx-flow-hash udp4
+//  - ethtool -N eth0 rx-flow-hash udp4 sdfn
+//  - watch "ethtool -S eth0 | grep 'rx_queue_[[:digit:]]*_packets'"
+//  - watch "netstat -s --udp"
+//  - htop
+//
 
 
 namespace urn_libuv {
@@ -39,6 +55,8 @@ inline void die_on_error (int code, const char *fn)
 struct config //{{{1
 {
   static constexpr std::chrono::seconds statistics_print_interval{5};
+
+  uint16_t threads = std::thread::hardware_concurrency();
 
   struct
   {
@@ -87,10 +105,6 @@ struct libuv::packet //{{{1
 
 struct libuv::client //{{{1
 {
-  uv_udp_t socket{};
-
-  client (const config &conf) noexcept;
-
   void start_receive () noexcept
   { }
 };
@@ -98,10 +112,6 @@ struct libuv::client //{{{1
 
 struct libuv::peer //{{{1
 {
-  uv_udp_t socket{};
-
-  peer (const config &conf) noexcept;
-
   void start_receive () noexcept
   { }
 };
@@ -123,10 +133,7 @@ public:
 
   relay (const config &conf) noexcept;
 
-  int run () noexcept
-  {
-    return uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-  }
+  int run () noexcept;
 
   void on_client_received (
     const sockaddr *src,
@@ -134,10 +141,9 @@ public:
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread || ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
+    if (nread && ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
     {
-      libuv::packet packet(*buf, nread);
-      logic_.on_client_received(*src, packet);
+      logic_.on_client_received(*src, {*buf, nread});
     }
     release_buffer(buf);
   }
@@ -148,10 +154,9 @@ public:
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread || ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
+    if (nread && ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
     {
-      libuv::packet packet(*buf, nread);
-      if (logic_.on_peer_received(*src, std::move(packet)))
+      if (logic_.on_peer_received(*src, {*buf, nread}))
       {
         return;
       }
@@ -171,28 +176,17 @@ public:
     logic_.print_statistics(config_.statistics_print_interval);
   }
 
-  const sockaddr *alloc_address () const noexcept
-  {
-    return &alloc_address_;
-  }
-
-  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
-  {
-    auto relay = static_cast<urn_libuv::relay *>(uv_default_loop()->data);
-    auto block = relay->allocator_.alloc();
-    buf->base = block->data;
-    buf->len = sizeof(block->data);
-  }
+  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *) noexcept;
+  static void release_buffer (const uv_buf_t *) noexcept;
 
 
 private:
 
   const config config_;
-  libuv::client client_;
-  libuv::peer peer_;
-  urn::relay<libuv, false> logic_;
-  sockaddr alloc_address_;
-  uv_timer_t statistics_timer_;
+  libuv::client client_{};
+  libuv::peer peer_{};
+  urn::relay<libuv, true> logic_{client_, peer_};
+  const sockaddr alloc_address_;
 
   struct block_pool
   {
@@ -231,18 +225,32 @@ private:
       pool_.push(b);
     }
 
-    static block *base_to_block_ptr (char *base) noexcept
+    static block *to_block_ptr (char *base) noexcept
     {
       return reinterpret_cast<block *>(
         base + sizeof(block::data) - sizeof(block)
       );
     }
-  } allocator_{};
+  };
 
-  void release_buffer (const uv_buf_t *buf) noexcept
+  struct thread
   {
-    allocator_.release(block_pool::base_to_block_ptr(buf->base));
-  }
+    using list = std::deque<thread>;
+
+    relay &owner;
+    uv_loop_t loop{};
+    block_pool blocks{};
+    uv_udp_t client{}, peer{};
+
+    thread (relay &owner)
+      : owner{owner}
+    {}
+
+    std::thread start ();
+  };
+  thread::list threads_{};
+
+  static thread *this_thread () noexcept;
 
   friend struct libuv::session;
 };
