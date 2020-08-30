@@ -167,7 +167,7 @@ private:
     constexpr const char *units[] = { "bps", "Kbps", "Mbps", "Gbps", };
     auto unit = std::cbegin(units);
 
-    auto bits_per_sec = 8 * (bytes / interval.count());
+    auto bits_per_sec = 8 * bytes / interval.count();
     while (bits_per_sec > 1000 && (unit + 1) != std::cend(units))
     {
       bits_per_sec /= 1000;
