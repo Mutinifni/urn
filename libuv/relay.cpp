@@ -127,6 +127,16 @@ void start_udp_listener (uv_loop_t &loop,
   constexpr auto flags = AF_INET | UV_UDP_RECVMMSG;
   libuv_call(uv_udp_init_ex, &loop, &socket, flags);
 
+#if defined(SO_REUSEPORT)
+  uv_os_fd_t fd;
+  libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
+  int enable = 1;
+  die_on_error(
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
+    "setsockopt"
+  );
+#endif
+
   auto addr = make_ip4_addr_any_with_port(port);
   libuv_call(uv_udp_bind, &socket,
     reinterpret_cast<const sockaddr *>(&addr),
