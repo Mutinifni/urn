@@ -124,7 +124,8 @@ void start_udp_listener (uv_loop_t &loop,
   uint16_t port,
   uv_udp_recv_cb cb) noexcept
 {
-  libuv_call(uv_udp_init, &loop, &socket);
+  constexpr auto flags = AF_INET | UV_UDP_RECVMMSG;
+  libuv_call(uv_udp_init_ex, &loop, &socket, flags);
 
   auto addr = make_ip4_addr_any_with_port(port);
   libuv_call(uv_udp_bind, &socket,

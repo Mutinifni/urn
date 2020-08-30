@@ -202,7 +202,7 @@ private:
         } session_send{};
       } ctl{};
       urn::intrusive_stack_hook<block> next{};
-      char data[8192];
+      char data[2 * 65536];
     };
     urn::intrusive_stack<&block::next> pool_{};
 
