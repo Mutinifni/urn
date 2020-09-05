@@ -94,7 +94,7 @@ void libuv::session::start_send (packet &&p) noexcept
     nullptr,
     [](uv_udp_send_t *request, int status) noexcept
     {
-      die_on_error(status, "session: uv_udp_send");
+      die_on_error(status, "session: uv_udp_send", __FILE__, __LINE__);
       auto block = reinterpret_cast<urn_libuv::relay::block_pool::block *>(request);
       relay::this_thread()->owner.on_session_sent(
         *block->ctl.session_send.session,
@@ -128,13 +128,17 @@ void start_udp_listener (uv_loop_t &loop,
   libuv_call(uv_udp_init_ex, &loop, &socket, flags);
 
 #if defined(SO_REUSEPORT)
+
   uv_os_fd_t fd;
   libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
   int enable = 1;
   die_on_error(
     setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
-    "setsockopt"
+    "setsockopt",
+    __FILE__,
+    __LINE__
   );
+
 #endif
 
   auto addr = make_ip4_addr_any_with_port(port);
@@ -162,7 +166,7 @@ std::thread relay::thread::start ()
       const sockaddr *src,
       unsigned flags) noexcept
     {
-      die_on_error((int)nread, "client: uv_udp_recv_start");
+      die_on_error((int)nread, "client: uv_udp_recv_start", __FILE__, __LINE__);
       auto self = static_cast<relay::thread *>(handle->loop->data);
       self->owner.on_client_received(src, nread, buf, flags);
     }
@@ -175,7 +179,7 @@ std::thread relay::thread::start ()
       const sockaddr *src,
       unsigned flags) noexcept
     {
-      die_on_error((int)nread, "peer: uv_udp_recv_start");
+      die_on_error((int)nread, "peer: uv_udp_recv_start", __FILE__, __LINE__);
       auto self = static_cast<relay::thread *>(handle->loop->data);
       self->owner.on_peer_received(src, nread, buf, flags);
     }

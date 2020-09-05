@@ -34,7 +34,7 @@
 namespace urn_libuv {
 
 
-inline void die_on_error (int code, const char *fn)
+inline void die_on_error (int code, const char *fn, const char *file, int line)
 {
   if (code < 0)
   {
@@ -44,12 +44,16 @@ inline void die_on_error (int code, const char *fn)
       << uv_strerror(code)
       << " ("
       << uv_err_name(code)
-      << ")\n";
+      << ") at "
+      << file
+      << ':'
+      << line
+      << '\n';
     abort();
   }
 }
 
-#define libuv_call(F, ...) die_on_error(F(__VA_ARGS__), #F)
+#define libuv_call(F, ...) die_on_error(F(__VA_ARGS__), #F, __FILE__, __LINE__)
 
 
 struct config //{{{1
@@ -214,7 +218,7 @@ private:
         b = new block;
         if (!b)
         {
-          die_on_error(UV_ENOMEM, "allocator::alloc");
+          die_on_error(UV_ENOMEM, "allocator::alloc", __FILE__, __LINE__);
         }
       }
       return b;
