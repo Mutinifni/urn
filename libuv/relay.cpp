@@ -16,14 +16,14 @@ void parse_numeric_argument (const std::string &name,
   try
   {
     auto ull = std::stoull(value);
-    if (ull <= std::numeric_limits<T>::max())
+    if (ull <= (std::numeric_limits<T>::max)())
     {
-      result = ull;
+      result = static_cast<T>(ull);
       return;
     }
     throw std::runtime_error(name + ": out of range (" + value + ')');
   }
-  catch (const std::invalid_argument &e)
+  catch (const std::invalid_argument &)
   {
     throw std::runtime_error(name + ": invalid argument (" + value + ')');
   }

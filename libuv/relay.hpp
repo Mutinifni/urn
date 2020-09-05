@@ -56,7 +56,7 @@ struct config //{{{1
 {
   static constexpr std::chrono::seconds statistics_print_interval{5};
 
-  uint16_t threads = std::thread::hardware_concurrency();
+  uint16_t threads = static_cast<uint16_t>(std::thread::hardware_concurrency());
 
   struct
   {
