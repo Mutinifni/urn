@@ -1,5 +1,8 @@
 #include <libuv/relay.hpp>
+#include <array>
+#include <deque>
 #include <string>
+#include <thread>
 
 
 namespace urn_libuv {
@@ -34,6 +37,7 @@ void parse_numeric_argument (const std::string &name,
 
 
 config::config (int argc, const char *argv[])
+  : threads{static_cast<uint16_t>(std::thread::hardware_concurrency())}
 {
   std::deque<std::string> args{argv + 1, argv + argc};
   for (auto i = 0u;  i < args.size();  ++i)
@@ -72,31 +76,31 @@ config::config (int argc, const char *argv[])
 namespace {
 
 
-//
-// Under Linux with UV_UDP_RECVMMSG, each io_buf can be split into many chunks
-// that can't be freed on own
-//
-
 struct io_buf
 {
-  union
+  urn::intrusive_stack_hook<io_buf> next{};
+
+  union chunk
   {
     struct
     {
-      uv_udp_send_t req{};
+      uv_udp_send_t request{};
       libuv::packet packet{};
       libuv::session *session{};
-    }  send{};
-  } ctl{};
+    } send{};
+  };
+  std::array<chunk, have_mmsg ? 32 : 1> chunks{};
+  size_t ref_count{};
 
-  urn::intrusive_stack_hook<io_buf> next{};
-  char data[2 * 64 * 1024];
+  static constexpr size_t data_size = have_mmsg ? 2 * 64 * 1024 : 64 * 1024;
+  char data[data_size];
 };
 
 
 struct io_buf_pool
 {
   urn::intrusive_stack<&io_buf::next> pool{};
+  io_buf *last_alloc{};
 
   io_buf *alloc () noexcept
   {
@@ -109,23 +113,42 @@ struct io_buf_pool
         die_on_error(UV_ENOMEM, "io_buf_pool::alloc", __FILE__, __LINE__);
       }
     }
-    std::cout << "alloc " << (void*)b << '\n';
+    b->ref_count = 0;
+    last_alloc = b;
     return b;
   }
 
   void release (io_buf *b) noexcept
   {
-    std::cout << "release " << (void*)b << '\n';
     pool.push(b);
   }
+};
 
-  static io_buf *to_io_mem_ptr (char *base) noexcept
+
+struct thread
+{
+  const uint16_t id;
+  relay &owner;
+  uv_loop_t loop{};
+  uv_udp_t client{}, peer{};
+  io_buf_pool io_bufs{};
+  std::thread sys_thread{};
+
+  thread (uint16_t id, relay &owner) noexcept
+    : id{id}
+    , owner{owner}
+  {}
+
+  void start ();
+
+  void join ()
   {
-    return reinterpret_cast<io_buf *>(
-      base + sizeof(io_buf::data) - sizeof(io_buf)
-    );
+    sys_thread.join();
   }
 };
+
+
+thread_local thread *this_thread = nullptr;
 
 
 sockaddr make_ip4_addr_any_with_port (uint16_t port)
@@ -144,52 +167,31 @@ void start_udp_listener (uv_loop_t &loop,
   constexpr auto udp_flags = AF_INET | (have_mmsg ? UV_UDP_RECVMMSG : 0);
   libuv_call(uv_udp_init_ex, &loop, &socket, udp_flags);
 
-#if defined(SO_REUSEPORT)
-
-  uv_os_fd_t fd;
-  libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
-  int enable = 1;
-  die_on_error(
-    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
-    "setsockopt",
-    __FILE__,
-    __LINE__
-  );
-
-#endif
+  #if (__urn_os_linux || __urn_os_macos) && defined(SO_REUSEPORT)
+    uv_os_fd_t fd;
+    libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
+    int enable = 1;
+    die_on_error(
+      setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
+      "setsockopt",
+      __FILE__,
+      __LINE__
+    );
+  #elif __urn_os_windows
+    #error TODO
+  #else
+    #error Unsupported plaftorm
+  #endif
 
   auto addr = make_ip4_addr_any_with_port(port);
+  constexpr auto bind_flags = UV_UDP_REUSEADDR;
   libuv_call(uv_udp_bind, &socket,
     reinterpret_cast<const sockaddr *>(&addr),
-    UV_UDP_REUSEADDR
+    bind_flags
   );
 
   libuv_call(uv_udp_recv_start, &socket, &relay::alloc_buffer, cb);
 }
-
-
-struct thread
-{
-  relay &owner;
-  uv_loop_t loop{};
-  uv_udp_t client{}, peer{};
-  io_buf_pool io_bufs{};
-  std::thread sys_thread{};
-
-  thread (relay &owner) noexcept
-    : owner(owner)
-  {}
-
-  void start ();
-
-  void join ()
-  {
-    sys_thread.join();
-  }
-};
-
-
-thread_local thread *this_thread = nullptr;
 
 
 void thread::start ()
@@ -205,8 +207,20 @@ void thread::start ()
       unsigned flags) noexcept
     {
       die_on_error((int)nread, "client: uv_udp_recv_start", __FILE__, __LINE__);
+
       auto self = static_cast<thread *>(handle->loop->data);
-      self->owner.on_client_received(src, nread, buf, flags);
+      if (nread > 0)
+      {
+        libuv::packet packet{*buf, static_cast<size_t>(nread)};
+        self->owner.on_client_received(*src, packet);
+      }
+
+      if (flags & UV_UDP_MMSG_CHUNK)
+      {
+        return;
+      }
+
+      self->io_bufs.release(self->io_bufs.last_alloc);
     }
   );
 
@@ -218,8 +232,24 @@ void thread::start ()
       unsigned flags) noexcept
     {
       die_on_error((int)nread, "peer: uv_udp_recv_start", __FILE__, __LINE__);
+
       auto self = static_cast<thread *>(handle->loop->data);
-      self->owner.on_peer_received(src, nread, buf, flags);
+      bool packet_reused = false;
+      if (nread > 0)
+      {
+        libuv::packet packet{*buf, static_cast<size_t>(nread)};
+        packet_reused = self->owner.on_peer_received(*src, packet);
+      }
+
+      if (packet_reused || (flags & UV_UDP_MMSG_CHUNK))
+      {
+        return;
+      }
+
+      if (self->io_bufs.last_alloc->ref_count == 0)
+      {
+        self->io_bufs.release(self->io_bufs.last_alloc);
+      }
     }
   );
 
@@ -262,7 +292,7 @@ int relay::run () noexcept
   std::deque<thread> threads;
   for (auto i = 0;  i < config_.threads;  ++i)
   {
-    threads.emplace_back(*this).start();
+    threads.emplace_back(i, *this).start();
   }
 
   auto exit_code = uv_run(loop, UV_RUN_DEFAULT);
@@ -285,18 +315,10 @@ void relay::alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
 }
 
 
-void relay::release_buffer (const uv_buf_t *buf, unsigned uv_flags) noexcept
-{
-  if (uv_flags & UV_UDP_MMSG_CHUNK)
-  {
-    return;
-  }
-  this_thread->io_bufs.release(io_buf_pool::to_io_mem_ptr(buf->base));
-}
-
-
 libuv::session::session (const endpoint &dest) noexcept
 {
+  // TODO: uv_udp_bind steals incoming stuff?
+  // if proven, don't bind & connect but use sendto instead in start_send
   libuv_call(uv_udp_init, &this_thread->loop, &socket);
   libuv_call(uv_udp_bind,
     &socket,
@@ -307,21 +329,36 @@ libuv::session::session (const endpoint &dest) noexcept
 }
 
 
-void libuv::session::start_send (packet &&p) noexcept
+void libuv::session::start_send (const libuv::packet &packet) noexcept
 {
-  auto b = io_buf_pool::to_io_mem_ptr(p.base);
-  b->ctl.send.session = this;
-  b->ctl.send.packet = std::move(p);
+  auto buf = this_thread->io_bufs.last_alloc;
 
-  libuv_call(uv_udp_send, &b->ctl.send.req,
+  if (buf->ref_count == buf->chunks.size())
+  {
+    die_on_error(UV_ENOBUFS, "session: start_send", __FILE__, __LINE__);
+  }
+
+  auto chunk = &buf->chunks[buf->ref_count++];
+  chunk->send.request.data = buf;
+  chunk->send.packet = packet;
+  chunk->send.session = this;
+
+  libuv_call(uv_udp_send, &chunk->send.request,
     &socket,
-    &b->ctl.send.packet, 1,
+    &chunk->send.packet, 1,
     nullptr,
     [](uv_udp_send_t *request, int status) noexcept
     {
       die_on_error(status, "session: uv_udp_send", __FILE__, __LINE__);
-      auto b = reinterpret_cast<io_buf *>(request);
-      this_thread->owner.on_session_sent(*b->ctl.send.session, b->ctl.send.packet);
+
+      auto chunk = reinterpret_cast<io_buf::chunk *>(request);
+      auto buf = reinterpret_cast<io_buf *>(chunk->send.request.data);
+      this_thread->owner.on_session_sent(*chunk->send.session, chunk->send.packet);
+
+      if (--buf->ref_count == 0)
+      {
+        this_thread->io_bufs.release(buf);
+      }
     }
   );
 }

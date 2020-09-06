@@ -78,7 +78,7 @@ struct test_lib
       last_ = this;
     }
 
-    void start_send (packet &&) noexcept
+    void start_send (const packet &) noexcept
     {
       start_send_invoked = true;
     }

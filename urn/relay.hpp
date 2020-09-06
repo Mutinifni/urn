@@ -68,7 +68,7 @@ public:
   }
 
 
-  bool on_peer_received (const endpoint_type &, packet_type &&packet)
+  bool on_peer_received (const endpoint_type &, const packet_type &packet)
   {
     update_io_statistics(stats_.in.packets, stats_.in.bytes, packet.size());
     if (packet.size() >= sizeof(session_id))
@@ -77,7 +77,7 @@ public:
       {
         // peer receive is restarted when sending finishes
         // (on_session_sent is invoked)
-        session->start_send(std::move(packet));
+        session->start_send(packet);
         return true;
       }
     }
