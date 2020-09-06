@@ -34,6 +34,9 @@
 namespace urn_libuv {
 
 
+constexpr bool have_mmsg = urn::is_linux_build;
+
+
 inline void die_on_error (int code, const char *fn, const char *file, int line)
 {
   if (code < 0)
@@ -135,9 +138,31 @@ class relay //{{{1
 {
 public:
 
-  relay (const config &conf) noexcept;
+  relay (const urn_libuv::config &conf) noexcept;
 
   int run () noexcept;
+
+
+  const urn_libuv::config &config () const noexcept
+  {
+    return config_;
+  }
+
+
+  const sockaddr &alloc_address () const noexcept
+  {
+    return alloc_address_;
+  }
+
+
+  void print_packet_info (const char *fn, size_t nread, unsigned flags)
+  {
+    std::cout << fn
+      << ": nread=" << nread
+      << "; flags=" << flags
+      << '\n';
+  }
+
 
   void on_client_received (
     const sockaddr *src,
@@ -145,12 +170,14 @@ public:
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread && ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
+    print_packet_info("on_client_received", nread, flags);
+    if (nread > 0)
     {
       logic_.on_client_received(*src, {*buf, nread});
     }
-    release_buffer(buf);
+    release_buffer(buf, flags);
   }
+
 
   void on_peer_received (
     const sockaddr *src,
@@ -158,105 +185,47 @@ public:
     const uv_buf_t *buf,
     unsigned flags) noexcept
   {
-    if (nread && ((flags & UV_UDP_PARTIAL) != UV_UDP_PARTIAL))
+    print_packet_info("on_peer_received", nread, flags);
+    if (nread > 0)
     {
       if (logic_.on_peer_received(*src, {*buf, nread}))
       {
+        // packet was reused for forwarding, will be release in
+        // on_session_sent()
         return;
       }
     }
-    release_buffer(buf);
+    release_buffer(buf, flags);
   }
+
 
   void on_session_sent (libuv::session &session, const libuv::packet &packet)
     noexcept
   {
+    std::cout << "on_session_sent: size=" << packet.size() << '\n';
     logic_.on_session_sent(session, packet);
-    release_buffer(&packet);
+    release_buffer(&packet, 0);
   }
+
 
   void on_statistics_tick () noexcept
   {
     logic_.print_statistics(config_.statistics_print_interval);
   }
 
-  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *) noexcept;
-  static void release_buffer (const uv_buf_t *) noexcept;
+
+  static void alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept;
+  static void release_buffer (const uv_buf_t *buf, unsigned uv_flags) noexcept;
 
 
 private:
 
-  const config config_;
+  const urn_libuv::config config_;
+  const sockaddr alloc_address_;
+
   libuv::client client_{};
   libuv::peer peer_{};
   urn::relay<libuv, true> logic_{client_, peer_};
-  const sockaddr alloc_address_;
-
-  struct block_pool
-  {
-    struct block
-    {
-      union
-      {
-        struct
-        {
-          uv_udp_send_t req{};
-          libuv::packet packet{};
-          libuv::session *session{};
-        } session_send{};
-      } ctl{};
-      urn::intrusive_stack_hook<block> next{};
-      char data[2 * 65536];
-    };
-    urn::intrusive_stack<&block::next> pool_{};
-
-    block *alloc () noexcept
-    {
-      auto b = pool_.try_pop();
-      if (!b)
-      {
-        b = new block;
-        if (!b)
-        {
-          die_on_error(UV_ENOMEM, "allocator::alloc", __FILE__, __LINE__);
-        }
-      }
-      return b;
-    }
-
-    void release (block *b) noexcept
-    {
-      pool_.push(b);
-    }
-
-    static block *to_block_ptr (char *base) noexcept
-    {
-      return reinterpret_cast<block *>(
-        base + sizeof(block::data) - sizeof(block)
-      );
-    }
-  };
-
-  struct thread
-  {
-    using list = std::deque<thread>;
-
-    relay &owner;
-    uv_loop_t loop{};
-    block_pool blocks{};
-    uv_udp_t client{}, peer{};
-
-    thread (relay &owner)
-      : owner{owner}
-    {}
-
-    std::thread start ();
-  };
-  thread::list threads_{};
-
-  static thread *this_thread () noexcept;
-
-  friend struct libuv::session;
 };
 
 
