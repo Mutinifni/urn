@@ -1,7 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
-
-cmake_policy(SET CMP0091 NEW)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+cmake_minimum_required(VERSION 3.8)
 
 project(urn LANGUAGES CXX)
 include(cmake/project_version.cmake)
@@ -36,6 +33,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   include(cmake/clang++.cmake)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   include(cmake/msvc.cmake)
+  add_compile_options(
+    $<$<CONFIG:>:/MT>
+    $<$<CONFIG:Debug>:/MTd>
+    $<$<CONFIG:Release>:/MT>
+  )
 else()
   message(WARNING "Unknown compiler")
 endif()
