@@ -139,12 +139,15 @@ struct thread
     , owner{owner}
   {}
 
-  void start ();
-
-  void join ()
+  ~thread ()
   {
-    sys_thread.join();
+    if (sys_thread.joinable())
+    {
+      sys_thread.join();
+    }
   }
+
+  void start ();
 };
 
 
@@ -159,6 +162,80 @@ sockaddr make_ip4_addr_any_with_port (uint16_t port)
 }
 
 
+//
+// SO_REUSEADDR && (SO_REUSEPORT || SO_REUSEPORT_LB)
+// https://stackoverflow.com/questions/14388706/how-do-so-reuseaddr-and-so-reuseport-differ
+//
+
+
+void enable_reuse_port (uv_udp_t &socket, uint16_t thread_id)
+{
+  (void)thread_id;
+
+  uv_os_fd_t fd;
+  libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
+
+  #if defined(SO_REUSEPORT_LB)
+
+    // XXX not tested
+
+    int enable = 1;
+    die_on_error(
+      setsockopt(fd, SOL_SOCKET, SO_REUSEPORT_LB, &enable, sizeof(enable)),
+      "setsockopt",
+      __FILE__,
+      __LINE__
+    );
+
+  #elif defined(SO_REUSEPORT)
+
+    int enable = 1;
+    die_on_error(
+      setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
+      "setsockopt",
+      __FILE__,
+      __LINE__
+    );
+
+  #elif __urn_os_windows
+
+    #if !defined(SIO_SET_PORT_SHARING_PER_PROC_SOCKET)
+      constexpr auto SIO_SET_PORT_SHARING_PER_PROC_SOCKET = _WSAIOW(IOC_VENDOR, 21);
+    #endif
+
+    DWORD bytes{};
+    auto rv = WSAIoctl(
+      reinterpret_cast<uv_os_sock_t>(fd),
+      SIO_SET_PORT_SHARING_PER_PROC_SOCKET,
+      &thread_id,
+      sizeof(thread_id),
+      nullptr,
+      0,
+      &bytes,
+      nullptr,
+      nullptr
+    );
+    if (rv != NO_ERROR)
+    {
+      throw std::system_error(
+        WSAGetLastError(),
+        std::system_category(),
+        "WSAIoctl(SIO_SET_PORT_SHARING_PER_PROC_SOCKET)"
+      );
+    }
+
+  #endif
+}
+
+
+constexpr auto bind_flags =
+  urn::is_windows_build ?
+    uv_udp_flags{}
+  :
+    UV_UDP_REUSEADDR
+;
+
+
 void start_udp_listener (uv_loop_t &loop,
   uv_udp_t &socket,
   uint16_t port,
@@ -167,24 +244,10 @@ void start_udp_listener (uv_loop_t &loop,
   constexpr auto udp_flags = AF_INET | (have_mmsg ? UV_UDP_RECVMMSG : 0);
   libuv_call(uv_udp_init_ex, &loop, &socket, udp_flags);
 
-  #if (__urn_os_linux || __urn_os_macos) && defined(SO_REUSEPORT)
-    uv_os_fd_t fd;
-    libuv_call(uv_fileno, reinterpret_cast<uv_handle_t *>(&socket), &fd);
-    int enable = 1;
-    die_on_error(
-      setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)),
-      "setsockopt",
-      __FILE__,
-      __LINE__
-    );
-  #elif __urn_os_windows
-    #error TODO
-  #else
-    #error Unsupported plaftorm
-  #endif
+  enable_reuse_port(socket, static_cast<thread *>(loop.data)->id);
 
   auto addr = make_ip4_addr_any_with_port(port);
-  constexpr auto bind_flags = UV_UDP_REUSEADDR;
+
   libuv_call(uv_udp_bind, &socket,
     reinterpret_cast<const sockaddr *>(&addr),
     bind_flags
@@ -290,20 +353,12 @@ int relay::run () noexcept
   );
 
   std::deque<thread> threads;
-  for (auto i = 0;  i < config_.threads;  ++i)
+  for (uint16_t id = 0;  id < config_.threads;  ++id)
   {
-    threads.emplace_back(i, *this).start();
+    threads.emplace_back(id, *this).start();
   }
 
-  auto exit_code = uv_run(loop, UV_RUN_DEFAULT);
-
-  // never reached actually, loop above is infinite
-  for (auto &thread: threads)
-  {
-    thread.join();
-  }
-
-  return exit_code;
+  return uv_run(loop, UV_RUN_DEFAULT);
 }
 
 
@@ -315,23 +370,10 @@ void relay::alloc_buffer (uv_handle_t *, size_t, uv_buf_t *buf) noexcept
 }
 
 
-libuv::session::session (const endpoint &dest) noexcept
-{
-  // TODO: uv_udp_bind steals incoming stuff?
-  // if proven, don't bind & connect but use sendto instead in start_send
-  libuv_call(uv_udp_init, &this_thread->loop, &socket);
-  libuv_call(uv_udp_bind,
-    &socket,
-    &this_thread->owner.alloc_address(),
-    UV_UDP_REUSEADDR
-  );
-  libuv_call(uv_udp_connect, &socket, &dest);
-}
-
-
 void libuv::session::start_send (const libuv::packet &packet) noexcept
 {
-  auto buf = this_thread->io_bufs.last_alloc;
+  auto &thread = *this_thread;
+  auto buf = thread.io_bufs.last_alloc;
 
   if (buf->ref_count == buf->chunks.size())
   {
@@ -344,9 +386,9 @@ void libuv::session::start_send (const libuv::packet &packet) noexcept
   chunk->send.session = this;
 
   libuv_call(uv_udp_send, &chunk->send.request,
-    &socket,
+    &thread.client,
     &chunk->send.packet, 1,
-    nullptr,
+    &client_endpoint,
     [](uv_udp_send_t *request, int status) noexcept
     {
       die_on_error(status, "session: uv_udp_send", __FILE__, __LINE__);

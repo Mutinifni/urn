@@ -122,9 +122,11 @@ struct libuv::peer //{{{1
 
 struct libuv::session //{{{1
 {
-  uv_udp_t socket{};
+  const endpoint client_endpoint;
 
-  session (const endpoint &dest) noexcept;
+  session (const endpoint &client_endpoint) noexcept
+    : client_endpoint(client_endpoint)
+  { }
 
   void start_send (const libuv::packet &packet) noexcept;
 };
