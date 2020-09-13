@@ -6,34 +6,40 @@
  */
 
 #include <urn/__bits/lib.hpp>
-#include <mutex>
+#include <shared_mutex>
 
 
 __urn_begin
 
 
 template <bool MultiThreaded>
-struct mutex: public std::mutex
+struct shared_mutex: public std::shared_mutex
 {
-  using std::mutex::mutex;
+  using std::shared_mutex::shared_mutex;
 };
 
 
 template <>
-struct mutex<false>
+struct shared_mutex<false>
 {
-  mutex () = default;
+  shared_mutex () = default;
 
-  mutex (const mutex &) = delete;
-  mutex (mutex &&) = delete;
+  shared_mutex (const shared_mutex &) = delete;
+  shared_mutex (shared_mutex &&) = delete;
 
-  mutex &operator= (const mutex &) = delete;
-  mutex &operator= (mutex &&) = delete;
+  shared_mutex &operator= (const shared_mutex &) = delete;
+  shared_mutex &operator= (shared_mutex &&) = delete;
 
   void lock () noexcept
   { }
 
   void unlock () noexcept
+  { }
+
+  void lock_shared () noexcept
+  { }
+
+  void unlock_shared () noexcept
   { }
 };
 

@@ -30,7 +30,7 @@ public:
   using session_id = uint64_t;
   using session_type = typename Library::session;
 
-  using mutex_type = mutex<MultiThreaded>;
+  using mutex_type = shared_mutex<MultiThreaded>;
 
 
   relay (client_type &client, peer_type &peer) noexcept
@@ -95,7 +95,7 @@ public:
 
   session_type *find_session (session_id id)
   {
-    std::lock_guard lock{sessions_mutex_};
+    std::shared_lock lock{sessions_mutex_};
     if (auto it = sessions_.find(id);  it != sessions_.end())
     {
       return &it->second;
