@@ -153,6 +153,12 @@ public:
   }
 
 
+  void on_thread_start (uint16_t thread_index)
+  {
+    logic_.on_thread_start(thread_index);
+  }
+
+
   void on_client_received (const libuv::endpoint &src, const libuv::packet &packet)
   {
     logic_.on_client_received(src, packet);
@@ -182,12 +188,12 @@ public:
 
 private:
 
-  const urn_libuv::config config_;
-  const sockaddr alloc_address_;
-
   libuv::client client_{};
   libuv::peer peer_{};
-  urn::relay<libuv, true> logic_{client_, peer_};
+
+  const urn_libuv::config config_;
+  const sockaddr alloc_address_;
+  urn::relay<libuv, true> logic_;
 };
 
 
