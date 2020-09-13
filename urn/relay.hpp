@@ -11,6 +11,8 @@
 #include <urn/mutex.hpp>
 #include <iostream>
 #include <unordered_map>
+#include <sstream>
+#include <vector>
 
 
 __urn_begin
@@ -33,30 +35,38 @@ public:
   using mutex_type = shared_mutex<MultiThreaded>;
 
 
-  relay (client_type &client, peer_type &peer) noexcept
+  relay (uint16_t thread_count, client_type &client, peer_type &peer) noexcept
     : client_{client}
     , peer_{peer}
+    , per_thread_statistics_{thread_count}
   { }
 
 
   void print_statistics (const std::chrono::seconds &interval)
   {
-    auto [in_packets, in_bytes, out_packets, out_bytes] = load_io_statistics();
-    auto [in_bps, in_unit] = bits_per_sec(in_bytes, interval);
-    auto [out_bps, out_unit] = bits_per_sec(out_bytes, interval);
-    in_packets /= interval.count();
-    out_packets /= interval.count();
+    std::string bytes_in_distribution;
+    auto stats = load_statistics(bytes_in_distribution);
+    auto [in_bps, in_unit] = bits_per_sec(stats.in.bytes, interval);
+    auto [out_bps, out_unit] = bits_per_sec(stats.out.bytes, interval);
+    stats.in.packets /= interval.count();
+    stats.out.packets /= interval.count();
     std::cout
-      << "in: " << in_packets << '/' << in_bps << in_unit
-      << " | "
-      << "out: " << out_packets << '/' << out_bps << out_unit
+      << "in: " << stats.in.packets << '/' << in_bps << in_unit
+      << " | out: " << stats.out.packets << '/' << out_bps << out_unit
+      << " | dist " << bytes_in_distribution
       << '\n';
+  }
+
+
+  void on_thread_start (uint16_t thread_index)
+  {
+    this_thread_statistics_ = &per_thread_statistics_.at(thread_index);
   }
 
 
   void on_client_received (const endpoint_type &src, const packet_type &packet)
   {
-    update_io_statistics(stats_.in.packets, stats_.in.bytes, packet.size());
+    update_io_statistics(this_thread_statistics_->in, packet);
     if (packet.size() == sizeof(session_id))
     {
       if (try_register_session(get_session_id(packet.data()), src))
@@ -70,7 +80,7 @@ public:
 
   bool on_peer_received (const endpoint_type &, const packet_type &packet)
   {
-    update_io_statistics(stats_.in.packets, stats_.in.bytes, packet.size());
+    update_io_statistics(this_thread_statistics_->in, packet);
     if (packet.size() >= sizeof(session_id))
     {
       if (auto session = find_session(get_session_id(packet.data())))
@@ -88,7 +98,7 @@ public:
 
   void on_session_sent (session_type &, const packet_type &packet)
   {
-    update_io_statistics(stats_.out.packets, stats_.out.bytes, packet.size());
+    update_io_statistics(this_thread_statistics_->out, packet);
     peer_.start_receive();
   }
 
@@ -113,14 +123,15 @@ private:
   session_map sessions_{};
   mutable mutex_type sessions_mutex_{};
 
-  struct
+  struct statistics
   {
-    struct
+    struct direction
     {
       size_t packets, bytes;
     } in{}, out{};
-  } stats_{};
-  mutable mutex_type stats_mutex_{};
+  };
+  std::vector<statistics> per_thread_statistics_;
+  static inline thread_local statistics *this_thread_statistics_{};
 
 
   static session_id get_session_id (const std::byte *data)
@@ -139,25 +150,46 @@ private:
   }
 
 
-  void update_io_statistics (size_t &count_var, size_t &size_var, size_t bytes)
-    noexcept
+  void update_io_statistics (typename statistics::direction &dir,
+    const packet_type &packet) noexcept
   {
-    std::lock_guard lock{stats_mutex_};
-    size_var += bytes;
-    count_var++;
+    dir.bytes += packet.size();
+    dir.packets++;
   }
 
 
-  std::tuple<size_t, size_t, size_t, size_t> load_io_statistics () noexcept
+  statistics load_statistics (std::string &bytes_in_distribution) noexcept
   {
-    std::lock_guard lock{stats_mutex_};
-    return
+    std::vector<size_t> bytes_in_per_thread(per_thread_statistics_.size());
+    auto it = bytes_in_per_thread.begin();
+
+    // not thread safe but good enough for statistics purpose
+    statistics total{};
+    for (auto &stats: per_thread_statistics_)
     {
-      std::exchange(stats_.in.packets, 0),
-      std::exchange(stats_.in.bytes, 0),
-      std::exchange(stats_.out.packets, 0),
-      std::exchange(stats_.out.bytes, 0)
-    };
+      auto in_bytes = std::exchange(stats.in.bytes, 0);
+      *it++ = in_bytes;
+
+      total.in.bytes += in_bytes;
+      total.in.packets += std::exchange(stats.in.packets, 0);
+
+      total.out.bytes += std::exchange(stats.out.bytes, 0);
+      total.out.packets += std::exchange(stats.out.packets, 0);
+    }
+
+    bytes_in_distribution.clear();
+    for (auto bytes_in: bytes_in_per_thread)
+    {
+      std::ostringstream oss;
+      oss << (total.in.bytes ? bytes_in * 100 / total.in.bytes : 0) << "%/";
+      bytes_in_distribution += oss.str();
+    }
+    if (!bytes_in_distribution.empty())
+    {
+      bytes_in_distribution.pop_back();
+    }
+
+    return total;
   }
 
 

@@ -320,6 +320,7 @@ void thread::start ()
     [this]()
     {
       this_thread = this;
+      this->owner.on_thread_start(id);
       uv_run(&loop, UV_RUN_DEFAULT);
     }
   );
@@ -332,6 +333,7 @@ void thread::start ()
 relay::relay (const urn_libuv::config &conf) noexcept
   : config_{conf}
   , alloc_address_{make_ip4_addr_any_with_port(config_.client.port)}
+  , logic_{config_.threads, client_, peer_}
 { }
 
 

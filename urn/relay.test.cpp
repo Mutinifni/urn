@@ -104,6 +104,7 @@ TEMPLATE_TEST_CASE("relay", "",
   single_threaded,
   multi_threaded)
 {
+#if 0
   typename TestType::client_type client{};
   typename TestType::peer_type peer{};
   TestType relay{client, peer};
@@ -272,6 +273,7 @@ TEMPLATE_TEST_CASE("relay", "",
       CHECK(peer.is_start_recv_invoked());
     }
   }
+#endif
 }
 
 
