@@ -9,6 +9,7 @@
 
 #include <urn/__bits/lib.hpp>
 #include <urn/mutex.hpp>
+#include <iomanip>
 #include <iostream>
 #include <unordered_map>
 #include <sstream>
@@ -129,6 +130,22 @@ private:
     {
       size_t packets, bytes;
     } in{}, out{};
+
+    void get_and_reset_into (statistics &dest)
+    {
+      dest.in.packets = std::exchange(in.packets, 0);
+      dest.in.bytes = std::exchange(in.bytes, 0);
+      dest.out.packets = std::exchange(out.packets, 0);
+      dest.out.bytes = std::exchange(out.bytes, 0);
+    }
+
+    void sum_into (statistics &dest)
+    {
+      dest.in.packets += in.packets;
+      dest.in.bytes += in.bytes;
+      dest.out.packets += out.packets;
+      dest.out.bytes += out.bytes;
+    }
   };
   std::vector<statistics> per_thread_statistics_;
   static inline thread_local statistics *this_thread_statistics_{};
@@ -158,35 +175,35 @@ private:
   }
 
 
-  statistics load_statistics (std::string &bytes_in_distribution) noexcept
+  statistics load_statistics (std::string &in_bytes_distribution) noexcept
   {
-    std::vector<size_t> bytes_in_per_thread(per_thread_statistics_.size());
-    auto it = bytes_in_per_thread.begin();
+    // not thread-safe but good enough to skip sync overhead
 
-    // not thread safe but good enough for statistics purpose
+    // aggregate and reset per thread stats
     statistics total{};
-    for (auto &stats: per_thread_statistics_)
+    std::vector<statistics> per_thread_statistics(per_thread_statistics_.size());
+    for (size_t i = 0;  i != per_thread_statistics_.size();  ++i)
     {
-      auto in_bytes = std::exchange(stats.in.bytes, 0);
-      *it++ = in_bytes;
-
-      total.in.bytes += in_bytes;
-      total.in.packets += std::exchange(stats.in.packets, 0);
-
-      total.out.bytes += std::exchange(stats.out.bytes, 0);
-      total.out.packets += std::exchange(stats.out.packets, 0);
+      per_thread_statistics_[i].get_and_reset_into(per_thread_statistics[i]);
+      per_thread_statistics[i].sum_into(total);
     }
 
-    bytes_in_distribution.clear();
-    for (auto bytes_in: bytes_in_per_thread)
+    // calculate ingress distribution between threads (result as string)
+    in_bytes_distribution.clear();
+    for (auto &statistics: per_thread_statistics)
     {
       std::ostringstream oss;
-      oss << (total.in.bytes ? bytes_in * 100 / total.in.bytes : 0) << "%/";
-      bytes_in_distribution += oss.str();
+      oss
+        << std::fixed
+        << std::setprecision(0)
+        << (total.in.bytes ? statistics.in.bytes * 100.0 / total.in.bytes : 0.0)
+        << "%/"
+      ;
+      in_bytes_distribution += oss.str();
     }
-    if (!bytes_in_distribution.empty())
+    if (in_bytes_distribution.size())
     {
-      bytes_in_distribution.pop_back();
+      in_bytes_distribution.pop_back();
     }
 
     return total;
