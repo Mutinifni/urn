@@ -1,7 +1,7 @@
 # UDP relay for network I/O scalability testing
 
-[![Build Status](https://travis-ci.org/svens/urn.svg?branch=master)](https://travis-ci.org/svens/urn)
-[![Coverage](https://coveralls.io/repos/github/svens/urn/badge.svg?branch=master)](https://coveralls.io/github/svens/urn?branch=master)
+[![Build](https://github.com/svens/urn/workflows/Build/badge.svg)](https://github.com/svens/urn/actions?query=workflow:Build)
+[![Coverage](https://coveralls.io/repos/github/svens/urn/badge.svg)](https://coveralls.io/github/svens/urn)
 
 UDP relay mimicks [TURN](https://tools.ietf.org/html/rfc5766) relay:
 * client connects to relay on port 3478 and registers itself using random
@@ -84,5 +84,4 @@ The source tree is organised as follows:
     |- bench        Business logic benchmarks
     |- cmake        CMake modules
     |- extern       External code as git submodules
-    |- libuv        [libuv](https://github.com/libuv/libuv) based experiment
-    `- scripts      Helper scripts
+    `- libuv        [libuv](https://github.com/libuv/libuv) based experiment
