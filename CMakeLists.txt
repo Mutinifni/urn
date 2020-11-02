@@ -9,7 +9,8 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 
 # Experiments
 # (note: all are turned off for Coverage build)
-option(urn_libuv "Experiment with libuv" ON)
+option(urn_libuv "Experiment with libuv" OFF)
+option(urn_mmsg "Experiment with mmsg" ON)
 
 # Business logic settings
 option(urn_unittests "Build unittests" ON)
@@ -21,6 +22,7 @@ if(CMAKE_BUILD_TYPE MATCHES Coverage)
   set(urn_unittests ON)
   set(urn_benchmarks OFF)
   set(urn_libuv OFF)
+  set(urn_mmsg OFF)
 endif()
 
 
@@ -95,7 +97,11 @@ if(urn_benchmarks)
 endif()
 
 
-# Experiments {{{2
+# Experiments
+if(urn_mmsg)
+  include(mmsg/list.cmake)
+endif()
+
 if(urn_libuv)
   include(libuv/list.cmake)
 endif()
@@ -106,7 +112,5 @@ foreach(experiment ${urn_experiments})
   add_executable(urn_${experiment} ${urn_${experiment}_sources})
   target_compile_options(urn_${experiment} PRIVATE ${max_warning_flags})
   target_include_directories(urn_${experiment} PRIVATE ${${experiment}_INCLUDE_DIR})
-  if(urn_${experiment}_libs)
-    target_link_libraries(urn_${experiment} urn::urn ${urn_${experiment}_libs})
-  endif()
+  target_link_libraries(urn_${experiment} urn::urn ${urn_${experiment}_libs})
 endforeach()
