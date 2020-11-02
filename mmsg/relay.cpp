@@ -128,24 +128,12 @@ void listen_context_initialize(listen_context* context, struct addrinfo* address
     set_nonblocking(context->socket_fd);
 
     {
-      int rcvSize = 0;
-      socklen_t siz = sizeof(rcvSize);
-      getsockopt(context->socket_fd, SOL_SOCKET, SO_RCVBUF, &rcvSize, &siz);
-      printf("receive buffer size: %d\n", rcvSize);
-    }
-    {
       int size = 4129920;
       ensure_success(setsockopt(context->socket_fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size)));
     }
     {
       int size = 4129920;
       ensure_success(setsockopt(context->socket_fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size)));
-    }
-    {
-      int rcvSize = 0;
-      socklen_t siz = sizeof(rcvSize);
-      getsockopt(context->socket_fd, SOL_SOCKET, SO_RCVBUF, &rcvSize, &siz);
-      printf("receive buffer size: %d\n", rcvSize);
     }
     {
       int enable = 1;
@@ -231,20 +219,6 @@ void run_peer_receive_frame(listen_context* context) {
     mmsg::packet packet{(const std::byte*) iov->iov_base, mmsg_header->msg_len};
     context->relay->on_peer_received(mmsg::endpoint(*from, context), packet);
   }
-}
-
-void HexDump(const void* src, size_t len) {
-  const uint8_t* bytes = (const uint8_t*) src;
-  for (size_t i = 0; i < len; i++) {
-    if (i % 8 == 0)
-      printf("%04x ", uint32_t(i));
-
-    printf("%02x ", bytes[i]);
-
-    if ((i + 1) % 8 == 0)
-      printf("\n");
-  }
-  printf("\n");
 }
 
 void run_client_receive_frame(listen_context* context) {
