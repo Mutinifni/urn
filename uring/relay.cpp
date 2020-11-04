@@ -218,14 +218,20 @@ int relay::run() noexcept {
   listen_context_initialize(io, local_client_address, local_peer_address, this);
   printf("%d %d\n", io->client_socket_fd, io->peer_socket_fd);
 
-  // ensure_success(io_uring_register_buffers(&ring, io.rx_vectors.data(), num_messages));
+  struct io_uring* ring = &io->ring;
+
+  {
+    struct iovec mem;
+    mem.iov_base = io->messages_buffer;
+    mem.iov_len = num_events * memory_per_packet;
+    ensure_success(io_uring_register_buffers(ring, &mem, 1));
+  }
 
   int sockets[2] = {io->peer_socket_fd, io->client_socket_fd};
   ensure_success(io_uring_register_files(&io->ring, sockets, 2));
 
   logic_.on_thread_start(0);
 
-  struct io_uring* ring = &io->ring;
 
   {
     ring_event* ev = get_free_event(io, ring_event_type_client_rx);
@@ -233,6 +239,7 @@ int relay::run() noexcept {
     io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
     sqe->flags |= IOSQE_FIXED_FILE;
+    sqe->flags |= IORING_OP_READ_FIXED;
   }
 
   {
@@ -241,6 +248,7 @@ int relay::run() noexcept {
     io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
     sqe->flags |= IOSQE_FIXED_FILE;
+    sqe->flags |= IORING_OP_READ_FIXED;
   }
 
   __kernel_timespec timeout = create_timeout(5000);
@@ -275,6 +283,7 @@ int relay::run() noexcept {
             io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
             sqe->flags |= IOSQE_FIXED_FILE;
+            sqe->flags |= IORING_OP_READ_FIXED;
           }
           break;
         }
@@ -290,6 +299,7 @@ int relay::run() noexcept {
             io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
             sqe->flags |= IOSQE_FIXED_FILE;
+            sqe->flags |= IORING_OP_READ_FIXED;
           }
           break;
         }
@@ -324,6 +334,7 @@ void uring::session::start_send(const uring::packet& packet) noexcept {
   io_uring_prep_sendmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   sqe->flags |= IOSQE_FIXED_FILE;
+  sqe->flags |= IORING_OP_WRITE_FIXED;
 
   io->relay->on_session_sent(*this, packet);
 }
