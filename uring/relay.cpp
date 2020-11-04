@@ -1,13 +1,13 @@
 #include <arpa/inet.h>
 #include <array>
 #include <cstring>
-#include <thread>
 #include <inttypes.h>
 #include <liburing.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 #include <uring/relay.hpp>
 #include <vector>
@@ -70,16 +70,19 @@ struct ring_event {
 
   struct {
     struct iovec iov;
-    struct sockaddr_storage address;
+    struct sockaddr_in address;
     struct msghdr message;
   } rx;
 };
 
+constexpr int k_peer_socket_id = 0;
+constexpr int k_client_socket_id = 1;
+
 struct listen_context {
   struct io_uring ring = {};
-  urn_uring::relay* relay = nullptr;
-  int client_socket_fd = -1;
   int peer_socket_fd = -1;
+  int client_socket_fd = -1;
+  urn_uring::relay* relay = nullptr;
   uint8_t* messages_buffer = nullptr;
   std::vector<uint32_t> free_event_ids = {};
   std::array<ring_event, num_events> io_events = {};
@@ -217,8 +220,8 @@ int relay::run() noexcept {
 
   // ensure_success(io_uring_register_buffers(&ring, io.rx_vectors.data(), num_messages));
 
-  // int sockets[2] = {io.client_socket_fd, io.peer_socket_fd};
-  // ensure_success(io_uring_register_files(&ring, sockets, 2));
+  int sockets[2] = {io->peer_socket_fd, io->client_socket_fd};
+  ensure_success(io_uring_register_files(&io->ring, sockets, 2));
 
   logic_.on_thread_start(0);
 
@@ -227,19 +230,21 @@ int relay::run() noexcept {
   {
     ring_event* ev = get_free_event(io, ring_event_type_client_rx);
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    io_uring_prep_recvmsg(sqe, io->client_socket_fd, &ev->rx.message, 0);
+    io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
+    sqe->flags |= IOSQE_FIXED_FILE;
   }
 
   {
     ring_event* ev = get_free_event(io, ring_event_type_peer_rx);
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    io_uring_prep_recvmsg(sqe, io->peer_socket_fd, &ev->rx.message, 0);
+    io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
+    sqe->flags |= IOSQE_FIXED_FILE;
   }
 
   __kernel_timespec timeout = create_timeout(5000);
-  { 
+  {
     ring_event* ev = get_free_event(io, ring_event_type_timer);
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
     io_uring_prep_timeout(sqe, &timeout, 0, 0);
@@ -267,8 +272,9 @@ int relay::run() noexcept {
           {
             ring_event* ev = get_free_event(io, ring_event_type_peer_rx);
             struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-            io_uring_prep_recvmsg(sqe, io->peer_socket_fd, &ev->rx.message, 0);
+            io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
+            sqe->flags |= IOSQE_FIXED_FILE;
           }
           break;
         }
@@ -281,8 +287,9 @@ int relay::run() noexcept {
           {
             ring_event* ev = get_free_event(io, ring_event_type_client_rx);
             struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-            io_uring_prep_recvmsg(sqe, io->client_socket_fd, &ev->rx.message, 0);
+            io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
+            sqe->flags |= IOSQE_FIXED_FILE;
           }
           break;
         }
@@ -314,8 +321,9 @@ void uring::session::start_send(const uring::packet& packet) noexcept {
   ev->rx.iov.iov_len = packet.size();
 
   struct io_uring_sqe* sqe = io_uring_get_sqe(&io->ring);
-  io_uring_prep_sendmsg(sqe, io->client_socket_fd, &ev->rx.message, 0);
+  io_uring_prep_sendmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
+  sqe->flags |= IOSQE_FIXED_FILE;
 
   io->relay->on_session_sent(*this, packet);
 }

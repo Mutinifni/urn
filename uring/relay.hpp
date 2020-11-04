@@ -33,10 +33,8 @@ struct uring {
 
 struct uring::endpoint {
   endpoint() = default;
-  endpoint(sockaddr_storage address, void* user_data)
-      : address(address), user_data(user_data) {
-  }
-  sockaddr_storage address = {};
+  endpoint(sockaddr_in address, void* user_data) : address(address), user_data(user_data) {}
+  sockaddr_in address = {};
   void* user_data = nullptr;
 };
 
