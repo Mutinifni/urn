@@ -170,7 +170,7 @@ void listen_context_initialize(listen_context* context, struct addrinfo* client_
   // params.flags |= IORING_SETUP_SQPOLL;
   // params.sq_thread_idle = 2000;
 
-  ensure_success(io_uring_queue_init_params(num_events, &context->ring, &params));
+  ensure_success(io_uring_queue_init_params(num_events * 2, &context->ring, &params));
 
   context->relay = relay;
   context->client_socket_fd = create_udp_socket(client_address_list);
@@ -238,7 +238,7 @@ int relay::run() noexcept {
     io_uring_sqe_set_data(sqe, ev);
   }
 
-  __kernel_timespec timeout = create_timeout(1000);
+  __kernel_timespec timeout = create_timeout(5000);
   { 
     ring_event* ev = get_free_event(io, ring_event_type_timer);
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
@@ -316,6 +316,8 @@ void uring::session::start_send(const uring::packet& packet) noexcept {
   struct io_uring_sqe* sqe = io_uring_get_sqe(&io->ring);
   io_uring_prep_sendmsg(sqe, io->client_socket_fd, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
+
+  io->relay->on_session_sent(*this, packet);
 }
 
 } // namespace urn_uring
