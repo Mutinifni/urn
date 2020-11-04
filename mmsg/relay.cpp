@@ -170,12 +170,6 @@ void listen_context_begin_frame(listen_context* context) {
 
   std::memset(&context->remote_addresses[0], 0, sizeof(context->remote_addresses));
 
-  for (auto& v : context->rx_vectors) {
-    if (v.iov_len != memory_per_packet) {
-      abort();
-    }
-  }
-
   for (size_t i = 0; i < context->rx_messages.size(); i++) {
     struct mmsghdr* mmsg_header = &context->rx_messages[i];
     mmsg_header->msg_len = 0;

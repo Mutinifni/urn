@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 
-project(urn LANGUAGES CXX)
+project(urn LANGUAGES CXX C)
 include(cmake/project_version.cmake)
 message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 
@@ -10,10 +10,11 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 # Experiments
 # (note: all are turned off for Coverage build)
 option(urn_libuv "Experiment with libuv" OFF)
-option(urn_mmsg "Experiment with mmsg" ON)
+option(urn_mmsg "Experiment with mmsg" OFF)
+option(urn_uring "Experiment with uring" ON)
 
 # Business logic settings
-option(urn_unittests "Build unittests" ON)
+option(urn_unittests "Build unittests" OFF)
 option(urn_benchmarks "Build benchmarking application" OFF)
 
 if(CMAKE_BUILD_TYPE MATCHES Coverage)
@@ -104,6 +105,10 @@ endif()
 
 if(urn_libuv)
   include(libuv/list.cmake)
+endif()
+
+if(urn_uring)
+  include(uring/list.cmake)
 endif()
 
 foreach(experiment ${urn_experiments})
