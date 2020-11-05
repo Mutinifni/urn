@@ -48,8 +48,6 @@ void ensure_success(int code) {
   abort();
 }
 
-} // namespace
-
 const size_t num_events = 16;
 const size_t memory_per_packet = 1024;
 
@@ -75,6 +73,7 @@ struct ring_event {
   } rx;
 };
 
+constexpr int64_t k_statistics_timeout_ms = 5000;
 constexpr int k_peer_socket_id = 0;
 constexpr int k_client_socket_id = 1;
 
@@ -139,7 +138,7 @@ int create_udp_socket(struct addrinfo* address_list) {
   return -1;
 }
 
-ring_event* get_free_event(listen_context* context, ring_event_type type) {
+ring_event* alloc_event(listen_context* context, ring_event_type type) {
   if (context->free_event_ids.size() == 0) {
     return nullptr;
   }
@@ -207,6 +206,30 @@ __kernel_timespec create_timeout(int64_t milliseconds) {
   return spec;
 }
 
+void add_recvmsg(struct io_uring* ring, ring_event* ev, int socket_id) {
+  struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  io_uring_prep_recvmsg(sqe, socket_id, &ev->rx.message, 0);
+  io_uring_sqe_set_data(sqe, ev);
+  sqe->flags |= IOSQE_FIXED_FILE;
+  sqe->buf_index = 0;
+}
+void add_sendmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
+  struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  io_uring_prep_sendmsg(sqe, socket_id, &ev->rx.message, 0);
+  io_uring_sqe_set_data(sqe, ev);
+  sqe->flags |= IOSQE_FIXED_FILE;
+  sqe->buf_index = 0;
+}
+
+void add_timeout(struct io_uring* ring, ring_event* ev, int64_t milliseconds) {
+  __kernel_timespec timeout = create_timeout(milliseconds);
+  struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  io_uring_prep_timeout(sqe, &timeout, 0, 0);
+  io_uring_sqe_set_data(sqe, ev);
+}
+
+} // namespace
+
 relay::relay(const urn_uring::config& conf) noexcept
     : config_{conf}, logic_{config_.threads, client_, peer_} {}
 
@@ -216,7 +239,6 @@ int relay::run() noexcept {
 
   listen_context* io = new listen_context();
   listen_context_initialize(io, local_client_address, local_peer_address, this);
-  printf("%d %d\n", io->client_socket_fd, io->peer_socket_fd);
 
   struct io_uring* ring = &io->ring;
 
@@ -232,31 +254,19 @@ int relay::run() noexcept {
 
   logic_.on_thread_start(0);
 
-
   {
-    ring_event* ev = get_free_event(io, ring_event_type_client_rx);
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
-    io_uring_sqe_set_data(sqe, ev);
-    sqe->flags |= IOSQE_FIXED_FILE;
-    sqe->buf_index = 0;
+    ring_event* ev = alloc_event(io, ring_event_type_client_rx);
+    add_recvmsg(ring, ev, k_client_socket_id);
   }
 
   {
-    ring_event* ev = get_free_event(io, ring_event_type_peer_rx);
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
-    io_uring_sqe_set_data(sqe, ev);
-    sqe->flags |= IOSQE_FIXED_FILE;
-    sqe->buf_index = 0;
+    ring_event* ev = alloc_event(io, ring_event_type_peer_rx);
+    add_recvmsg(ring, ev, k_peer_socket_id);
   }
 
-  __kernel_timespec timeout = create_timeout(5000);
   {
-    ring_event* ev = get_free_event(io, ring_event_type_timer);
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    io_uring_prep_timeout(sqe, &timeout, 0, 0);
-    io_uring_sqe_set_data(sqe, ev);
+    ring_event* ev = alloc_event(io, ring_event_type_timer);
+    add_timeout(ring, ev, k_statistics_timeout_ms);
   }
 
   for (;;) {
@@ -277,14 +287,8 @@ int relay::run() noexcept {
           uring::packet packet{(const std::byte*) message->msg_iov->iov_base, (uint32_t) cqe->res};
           io->relay->on_peer_received(uring::endpoint(event->rx.address, io), packet);
 
-          {
-            ring_event* ev = get_free_event(io, ring_event_type_peer_rx);
-            struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-            io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
-            io_uring_sqe_set_data(sqe, ev);
-            sqe->flags |= IOSQE_FIXED_FILE;
-            sqe->buf_index = 0;
-          }
+          ring_event* ev = alloc_event(io, ring_event_type_peer_rx);
+          add_recvmsg(ring, ev, k_peer_socket_id);
           break;
         }
         case ring_event_type_client_rx: {
@@ -293,22 +297,14 @@ int relay::run() noexcept {
               uring::endpoint(event->rx.address, io),
               uring::packet((const std::byte*) message->msg_iov->iov_base, cqe->res));
 
-          {
-            ring_event* ev = get_free_event(io, ring_event_type_client_rx);
-            struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-            io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
-            io_uring_sqe_set_data(sqe, ev);
-            sqe->flags |= IOSQE_FIXED_FILE;
-            sqe->buf_index = 0;
-          }
+          ring_event* ev = alloc_event(io, ring_event_type_client_rx);
+          add_recvmsg(ring, ev, k_client_socket_id);
           break;
         }
         case ring_event_type_timer: {
           on_statistics_tick();
-          ring_event* ev = get_free_event(io, ring_event_type_timer);
-          struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-          io_uring_prep_timeout(sqe, &timeout, 0, 0);
-          io_uring_sqe_set_data(sqe, ev);
+          ring_event* ev = alloc_event(io, ring_event_type_timer);
+          add_timeout(ring, ev, k_statistics_timeout_ms);
           break;
         }
         default:
@@ -325,16 +321,12 @@ int relay::run() noexcept {
 
 void uring::session::start_send(const uring::packet& packet) noexcept {
   listen_context* io = (listen_context*) client_endpoint.user_data;
-  ring_event* ev = get_free_event(io, ring_event_type_peer_tx);
+  ring_event* ev = alloc_event(io, ring_event_type_peer_tx);
   ev->rx.address = client_endpoint.address;
   memcpy(ev->rx.iov.iov_base, packet.data(), packet.size());
   ev->rx.iov.iov_len = packet.size();
 
-  struct io_uring_sqe* sqe = io_uring_get_sqe(&io->ring);
-  io_uring_prep_sendmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
-  io_uring_sqe_set_data(sqe, ev);
-  sqe->flags |= IOSQE_FIXED_FILE;
-  sqe->buf_index = 0;
+  add_sendmsg(&io->ring, ev, k_client_socket_id);
 
   io->relay->on_session_sent(*this, packet);
 }
