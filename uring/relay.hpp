@@ -94,7 +94,7 @@ private:
   uring::peer peer_{};
 
   const urn_uring::config config_;
-  urn::relay<uring, false> logic_;
+  urn::relay<uring, true> logic_;
 };
 
 } // namespace urn_uring
