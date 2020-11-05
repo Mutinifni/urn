@@ -129,6 +129,7 @@ struct listen_context {
   int peer_socket_fd = -1;
   int client_socket_fd = -1;
   worker_args worker_info = {};
+  struct iovec buffers_mem = {};
 };
 
 void print_address(const struct addrinfo* address) {
@@ -232,6 +233,7 @@ void listen_context_initialize(listen_context* io, worker_args args) {
     constexpr int k_client_socket_id = 1;
     io->client_socket = k_client_socket_id;
     io->peer_socket = k_peer_socket_id;
+    printf("[thread %d] using fixed files\n", io->worker_info.thread_index);
   } else {
     io->client_socket = io->client_socket_fd;
     io->peer_socket = io->peer_socket_fd;
@@ -245,10 +247,10 @@ void listen_context_initialize(listen_context* io, worker_args args) {
   }
 
   if (FEAT_FIXED_BUFFERS) {
-    struct iovec mem;
-    mem.iov_base = io->messages_buffer;
-    mem.iov_len = num_events * memory_per_packet;
-    ensure_success(io_uring_register_buffers(&io->ring, &mem, 1));
+    io->buffers_mem.iov_base = io->messages_buffer;
+    io->buffers_mem.iov_len = num_events * memory_per_packet;
+    ensure_success(io_uring_register_buffers(&io->ring, &io->buffers_mem, 1));
+    printf("[thread %d] using fixed buffers\n", io->worker_info.thread_index);
   }
 }
 
