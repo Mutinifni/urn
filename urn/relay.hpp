@@ -103,6 +103,12 @@ public:
     peer_.start_receive();
   }
 
+  void on_session_sent (const packet_type &packet)
+  {
+    update_io_statistics(this_thread_statistics_->out, packet);
+    peer_.start_receive();
+  }
+
 
   session_type *find_session (session_id id)
   {

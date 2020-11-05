@@ -128,6 +128,7 @@ struct listen_context {
 
   int peer_socket_fd = -1;
   int client_socket_fd = -1;
+  int sockets[2] = {};
   worker_args worker_info = {};
   struct iovec buffers_mem = {};
 };
@@ -216,6 +217,8 @@ void release_event(listen_context* context, ring_event* ev) {
 void listen_context_initialize(listen_context* io, worker_args args) {
   struct io_uring_params params;
   memset(&params, 0, sizeof(params));
+  params.flags |= IORING_SETUP_SQPOLL;
+  params.sq_thread_idle = 2000;
 
   ensure_success(io_uring_queue_init_params(num_events * 2, &io->ring, &params));
 
@@ -227,12 +230,11 @@ void listen_context_initialize(listen_context* io, worker_args args) {
          io->peer_socket_fd);
 
   if (FEAT_FIXED_FILE) {
-    int sockets[2] = {io->peer_socket_fd, io->client_socket_fd};
-    ensure_success(io_uring_register_files(&io->ring, sockets, 2));
-    constexpr int k_peer_socket_id = 0;
-    constexpr int k_client_socket_id = 1;
-    io->client_socket = k_client_socket_id;
-    io->peer_socket = k_peer_socket_id;
+    io->sockets[0] = io->peer_socket_fd;
+    io->sockets[1] = io->client_socket_fd;
+    ensure_success(io_uring_register_files(&io->ring, io->sockets, 2));
+    io->peer_socket = 0;
+    io->client_socket = 1;
     printf("[thread %d] using fixed files\n", io->worker_info.thread_index);
   } else {
     io->client_socket = io->client_socket_fd;
@@ -291,13 +293,16 @@ void enable_fixed_buffers(struct io_uring_sqe*) {}
 
 void add_recvmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  if (!sqe) abort();
   io_uring_prep_recvmsg(sqe, socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   enable_fixed_file(sqe);
   enable_fixed_buffers(sqe);
 }
+
 void add_sendmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  if (!sqe) abort();
   io_uring_prep_sendmsg(sqe, socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   enable_fixed_file(sqe);
@@ -307,6 +312,7 @@ void add_sendmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
 void add_timeout(struct io_uring* ring, ring_event* ev, int64_t milliseconds) {
   ev->timeout = create_timeout(milliseconds);
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+  if (!sqe) abort();
   io_uring_prep_timeout(sqe, &ev->timeout, 0, 0);
   io_uring_sqe_set_data(sqe, ev);
 }
@@ -361,14 +367,27 @@ void worker(worker_args args) {
           uring::packet packet{(const std::byte*) message->msg_iov->iov_base, (uint32_t) cqe->res};
           io->relay->on_peer_received(uring::endpoint(event->rx.address, io), packet);
 
-          // switcharoo, reuse the receive buffer for sending
-          event->type = ring_event_type_peer_tx;
-          event->rx.iov.iov_len = cqe->res;
-          add_sendmsg(&io->ring, event, io->client_socket);
+          {
+            //ring_event* tx_event = alloc_event(io, ring_event_type_peer_tx);
+            // tx_event->rx.address = 
+            //memcpy(tx_event->rx.iov.iov_base, event->rx.iov.iov_base, cqe->res);
+            // switcharoo, reuse the receive buffer for sending
+            //event->type = ring_event_type_peer_tx;
+            //event->rx.iov.iov_len = cqe->res;
+            //add_sendmsg(&io->ring, event, io->client_socket);
+            release_event(io, event);
+          }
 
           // allocate a new event for reception
           ring_event* rx_event = alloc_event(io, ring_event_type_peer_rx);
           add_recvmsg(ring, rx_event, io->peer_socket);
+          break;
+        }
+        case ring_event_type_peer_tx: {
+          printf("tx done %d\n", cqe->res);
+          uring::packet packet{(const std::byte*) event->rx.message.msg_iov->iov_base, (uint32_t) cqe->res};
+          io->relay->on_session_sent(packet);
+          release_event(io, event);
           break;
         }
         case ring_event_type_client_rx: {
@@ -376,6 +395,7 @@ void worker(worker_args args) {
             printf("thread [%d] client rx: %s\n", args.thread_index, strerror(-cqe->res));
             abort();
           }
+
           const msghdr* message = &event->rx.message;
           io->relay->on_client_received(
               uring::endpoint(event->rx.address, io),
@@ -442,7 +462,14 @@ int relay::run() noexcept {
 
 void uring::session::start_send(const uring::packet& packet) noexcept {
   listen_context* io = (listen_context*) client_endpoint.user_data;
-  io->relay->on_session_sent(*this, packet);
+
+  ring_event* tx_event = alloc_event(io, ring_event_type_peer_tx);
+  tx_event->rx.address = client_endpoint.address;
+  memcpy(tx_event->rx.iov.iov_base, packet.data(), packet.size());
+  tx_event->rx.iov.iov_len = packet.size();
+  add_sendmsg(&io->ring, tx_event, io->client_socket);
+
+  //io->relay->on_session_sent(*this, packet);
 }
 
 } // namespace urn_uring

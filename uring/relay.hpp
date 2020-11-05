@@ -87,6 +87,10 @@ public:
     logic_.on_session_sent(session, packet);
   }
 
+  void on_session_sent(const uring::packet& packet) {
+    logic_.on_session_sent(packet);
+  }
+
   void on_statistics_tick() noexcept { logic_.print_statistics(config_.statistics_print_interval); }
 
 private:
