@@ -239,7 +239,7 @@ int relay::run() noexcept {
     io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
     sqe->flags |= IOSQE_FIXED_FILE;
-    sqe->flags |= IORING_OP_READ_FIXED;
+    sqe->buf_index = 0;
   }
 
   {
@@ -248,7 +248,7 @@ int relay::run() noexcept {
     io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
     io_uring_sqe_set_data(sqe, ev);
     sqe->flags |= IOSQE_FIXED_FILE;
-    sqe->flags |= IORING_OP_READ_FIXED;
+    sqe->buf_index = 0;
   }
 
   __kernel_timespec timeout = create_timeout(5000);
@@ -283,7 +283,7 @@ int relay::run() noexcept {
             io_uring_prep_recvmsg(sqe, k_peer_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
             sqe->flags |= IOSQE_FIXED_FILE;
-            sqe->flags |= IORING_OP_READ_FIXED;
+            sqe->buf_index = 0;
           }
           break;
         }
@@ -299,7 +299,7 @@ int relay::run() noexcept {
             io_uring_prep_recvmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
             io_uring_sqe_set_data(sqe, ev);
             sqe->flags |= IOSQE_FIXED_FILE;
-            sqe->flags |= IORING_OP_READ_FIXED;
+            sqe->buf_index = 0;
           }
           break;
         }
@@ -334,7 +334,7 @@ void uring::session::start_send(const uring::packet& packet) noexcept {
   io_uring_prep_sendmsg(sqe, k_client_socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   sqe->flags |= IOSQE_FIXED_FILE;
-  sqe->flags |= IORING_OP_WRITE_FIXED;
+  sqe->buf_index = 0;
 
   io->relay->on_session_sent(*this, packet);
 }
