@@ -70,7 +70,9 @@ public:
     update_io_statistics(this_thread_statistics_->in, packet);
     if (packet.size() == sizeof(session_id))
     {
-      if (try_register_session(get_session_id(packet.data()), src))
+      session_id id = get_session_id(packet.data());
+      // printf("client received sess %lu\n", id);
+      if (try_register_session(id, src))
       {
         peer_.start_receive();
       }
@@ -84,13 +86,15 @@ public:
     update_io_statistics(this_thread_statistics_->in, packet);
     if (packet.size() >= sizeof(session_id))
     {
-      if (auto session = find_session(get_session_id(packet.data())))
+      session_id id = get_session_id(packet.data());
+      if (auto session = find_session(id))
       {
         // peer receive is restarted when sending finishes
         // (on_session_sent is invoked)
         session->start_send(packet);
         return true;
       }
+      // printf("session %lu not found\n", id);
     }
     peer_.start_receive();
     return false;

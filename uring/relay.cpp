@@ -4,16 +4,17 @@
 #include <cstring>
 #include <liburing.h>
 #include <netdb.h>
+#include <signal.h>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 #include <uring/relay.hpp>
 #include <vector>
 
-#define unlikely(x) __builtin_expect((x), 0)
-
-#define FEAT_FIXED_BUFFERS 1
-#define FEAT_FIXED_FILE 1
+#define ENABLE_FIXED_BUFFERS 1
+#define ENABLE_FIXED_FILE 1
+#define ENABLE_SQPOLL 0
 
 namespace urn_uring {
 
@@ -47,7 +48,7 @@ void ensure_success(int code) {
     return;
   }
 
-  fprintf(stderr, "%s\n", strerror(code));
+  fprintf(stderr, "%s\n", strerror(-code));
   abort();
 }
 
@@ -133,6 +134,8 @@ struct listen_context {
   struct iovec buffers_mem = {};
 };
 
+thread_local listen_context* local_io = nullptr;
+
 void print_address(const struct addrinfo* address) {
   char readable_ip[INET6_ADDRSTRLEN] = {0};
 
@@ -187,8 +190,8 @@ void bind_socket(int fd, struct addrinfo* address) {
 }
 
 ring_event* alloc_event(listen_context* context, ring_event_type type) {
-  if (unlikely(context->free_event_ids.size() == 0)) {
-    printf("out of free events\n");
+  if (context->free_event_ids.size() == 0) {
+    printf("[thread %d] out of free events\n", context->worker_info.thread_index);
     abort();
     return nullptr;
   }
@@ -197,7 +200,6 @@ ring_event* alloc_event(listen_context* context, ring_event_type type) {
   context->free_event_ids.pop_back();
 
   ring_event* event = &context->io_events[free_id];
-  memset(event, 0, sizeof(*event));
   event->type = type;
   event->index = free_id;
   event->rx.iov.iov_base = &context->messages_buffer[free_id * memory_per_packet];
@@ -217,25 +219,29 @@ void release_event(listen_context* context, ring_event* ev) {
 void listen_context_initialize(listen_context* io, worker_args args) {
   struct io_uring_params params;
   memset(&params, 0, sizeof(params));
-  params.flags |= IORING_SETUP_SQPOLL;
-  params.sq_thread_idle = 2000;
 
-  ensure_success(io_uring_queue_init_params(num_events * 2, &io->ring, &params));
+  if (ENABLE_SQPOLL) {
+    params.flags |= IORING_SETUP_SQPOLL;
+    params.sq_thread_idle = 1000;
+    printf("[thread %d] using SQPOLL\n", args.thread_index);
+  }
+
+  ensure_success(io_uring_queue_init_params(4096, &io->ring, &params));
 
   io->worker_info = args;
   io->relay = args.relay;
   io->client_socket_fd = create_udp_socket(args.local_client_address);
   io->peer_socket_fd = create_udp_socket(args.local_peer_address);
-  printf("[thread %d] sockets: %d %d\n", io->worker_info.thread_index, io->client_socket_fd,
+  printf("[thread %d] sockets: %d %d\n", args.thread_index, io->client_socket_fd,
          io->peer_socket_fd);
 
-  if (FEAT_FIXED_FILE) {
+  if (ENABLE_FIXED_FILE) {
     io->sockets[0] = io->peer_socket_fd;
     io->sockets[1] = io->client_socket_fd;
     ensure_success(io_uring_register_files(&io->ring, io->sockets, 2));
     io->peer_socket = 0;
     io->client_socket = 1;
-    printf("[thread %d] using fixed files\n", io->worker_info.thread_index);
+    printf("[thread %d] using fixed files\n", args.thread_index);
   } else {
     io->client_socket = io->client_socket_fd;
     io->peer_socket = io->peer_socket_fd;
@@ -248,11 +254,11 @@ void listen_context_initialize(listen_context* io, worker_args args) {
     io->free_event_ids.push_back(i);
   }
 
-  if (FEAT_FIXED_BUFFERS) {
+  if (ENABLE_FIXED_BUFFERS) {
     io->buffers_mem.iov_base = io->messages_buffer;
     io->buffers_mem.iov_len = num_events * memory_per_packet;
     ensure_success(io_uring_register_buffers(&io->ring, &io->buffers_mem, 1));
-    printf("[thread %d] using fixed buffers\n", io->worker_info.thread_index);
+    printf("[thread %d] using fixed buffers\n", args.thread_index);
   }
 }
 
@@ -276,13 +282,13 @@ __kernel_timespec create_timeout(int64_t milliseconds) {
   return spec;
 }
 
-#if FEAT_FIXED_FILE
+#if ENABLE_FIXED_FILE
 void enable_fixed_file(struct io_uring_sqe* sqe) { sqe->flags |= IOSQE_FIXED_FILE; }
 #else
 void enable_fixed_file(struct io_uring_sqe*) {}
 #endif
 
-#if FEAT_FIXED_BUFFERS
+#if ENABLE_FIXED_BUFFERS
 void enable_fixed_buffers(struct io_uring_sqe* sqe) {
   // One huge slab is registered and then partitioned manually
   sqe->buf_index = 0;
@@ -293,7 +299,8 @@ void enable_fixed_buffers(struct io_uring_sqe*) {}
 
 void add_recvmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-  if (!sqe) abort();
+  if (!sqe)
+    abort();
   io_uring_prep_recvmsg(sqe, socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   enable_fixed_file(sqe);
@@ -302,7 +309,8 @@ void add_recvmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
 
 void add_sendmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-  if (!sqe) abort();
+  if (!sqe)
+    abort();
   io_uring_prep_sendmsg(sqe, socket_id, &ev->rx.message, 0);
   io_uring_sqe_set_data(sqe, ev);
   enable_fixed_file(sqe);
@@ -312,13 +320,18 @@ void add_sendmsg(struct io_uring* ring, ring_event* ev, int32_t socket_id) {
 void add_timeout(struct io_uring* ring, ring_event* ev, int64_t milliseconds) {
   ev->timeout = create_timeout(milliseconds);
   struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-  if (!sqe) abort();
+  if (!sqe)
+    abort();
   io_uring_prep_timeout(sqe, &ev->timeout, 0, 0);
   io_uring_sqe_set_data(sqe, ev);
 }
 
+volatile sig_atomic_t has_sigint = 0;
+
 void worker(worker_args args) {
-  listen_context* io = new listen_context();
+  auto iop = std::make_unique<listen_context>();
+  listen_context* io = iop.get();
+  local_io = io;
   listen_context_initialize(io, args);
 
   struct io_uring* ring = &io->ring;
@@ -359,7 +372,7 @@ void worker(worker_args args) {
 
       switch (event->type) {
         case ring_event_type_peer_rx: {
-          if (unlikely(cqe->res < 0)) {
+          if (cqe->res < 0) {
             printf("thread [%d] peer rx %s\n", args.thread_index, strerror(-cqe->res));
             abort();
           }
@@ -367,31 +380,21 @@ void worker(worker_args args) {
           uring::packet packet{(const std::byte*) message->msg_iov->iov_base, (uint32_t) cqe->res};
           io->relay->on_peer_received(uring::endpoint(event->rx.address, io), packet);
 
-          {
-            //ring_event* tx_event = alloc_event(io, ring_event_type_peer_tx);
-            // tx_event->rx.address = 
-            //memcpy(tx_event->rx.iov.iov_base, event->rx.iov.iov_base, cqe->res);
-            // switcharoo, reuse the receive buffer for sending
-            //event->type = ring_event_type_peer_tx;
-            //event->rx.iov.iov_len = cqe->res;
-            //add_sendmsg(&io->ring, event, io->client_socket);
-            release_event(io, event);
-          }
+          release_event(io, event);
 
-          // allocate a new event for reception
           ring_event* rx_event = alloc_event(io, ring_event_type_peer_rx);
           add_recvmsg(ring, rx_event, io->peer_socket);
           break;
         }
         case ring_event_type_peer_tx: {
-          printf("tx done %d\n", cqe->res);
-          uring::packet packet{(const std::byte*) event->rx.message.msg_iov->iov_base, (uint32_t) cqe->res};
+          uring::packet packet{(const std::byte*) event->rx.message.msg_iov->iov_base,
+                               (uint32_t) cqe->res};
           io->relay->on_session_sent(packet);
           release_event(io, event);
           break;
         }
         case ring_event_type_client_rx: {
-          if (unlikely(cqe->res < 0)) {
+          if (cqe->res < 0) {
             printf("thread [%d] client rx: %s\n", args.thread_index, strerror(-cqe->res));
             abort();
           }
@@ -400,7 +403,10 @@ void worker(worker_args args) {
           io->relay->on_client_received(
               uring::endpoint(event->rx.address, io),
               uring::packet((const std::byte*) message->msg_iov->iov_base, cqe->res));
-          add_recvmsg(ring, event, io->client_socket); // reuse
+          release_event(io, event);
+
+          ring_event* rx_event = alloc_event(io, ring_event_type_client_rx);
+          add_recvmsg(ring, rx_event, io->client_socket);
           break;
         }
         case ring_event_type_timer: {
@@ -408,14 +414,26 @@ void worker(worker_args args) {
           add_timeout(ring, event, k_statistics_timeout_ms); // reuse
           break;
         }
-        default:
+        default: {
+          printf("unhandled ev\n");
           release_event(io, event);
           break;
+        }
       }
     }
     io_uring_cq_advance(ring, count);
+
+    if (has_sigint) {
+      break;
+    }
   }
+
+  printf("%d worker exiting \n", io->worker_info.thread_index);
+
+  io_uring_queue_exit(ring);
 }
+
+void handle_sigint(int) { has_sigint = 1; }
 
 } // namespace
 
@@ -423,6 +441,15 @@ relay::relay(const urn_uring::config& conf) noexcept
     : config_{conf}, logic_{config_.threads, client_, peer_} {}
 
 int relay::run() noexcept {
+  if (ENABLE_SQPOLL) {
+    if (geteuid() != 0) {
+      printf("SQPOLL needs sudo\n");
+      return 1;
+    }
+  }
+
+  signal(SIGINT, handle_sigint);
+
   int32_t thread_count = std::max(uint16_t(1), config_.threads);
 
   struct addrinfo* local_client_address = bindable_address("3478");
@@ -453,23 +480,25 @@ int relay::run() noexcept {
 
   worker(main_thread_args);
 
+  printf("joining\n");
+
   for (auto& t : worker_threads) {
     t.join();
   }
+
+  printf("joined\n");
 
   return 0;
 }
 
 void uring::session::start_send(const uring::packet& packet) noexcept {
-  listen_context* io = (listen_context*) client_endpoint.user_data;
+  listen_context* io = local_io;
 
   ring_event* tx_event = alloc_event(io, ring_event_type_peer_tx);
   tx_event->rx.address = client_endpoint.address;
   memcpy(tx_event->rx.iov.iov_base, packet.data(), packet.size());
   tx_event->rx.iov.iov_len = packet.size();
   add_sendmsg(&io->ring, tx_event, io->client_socket);
-
-  //io->relay->on_session_sent(*this, packet);
 }
 
 } // namespace urn_uring
