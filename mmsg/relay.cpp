@@ -209,8 +209,8 @@ void io_worker_init(io_worker* io, io_worker_args args) {
 
   io->message_mem = (uint8_t*)calloc(k_mmsg_capacity, k_memory_per_packet);
 
-  io_state_init(&io->peers_io, io->message_mem, capacity);
-  io_state_init(&io->clients_io, io->message_mem, capacity);
+  io_state_init(&io->peers_io, io->message_mem, k_mmsg_capacity);
+  io_state_init(&io->clients_io, io->message_mem, k_mmsg_capacity);
 
   io->worker_index = args.worker_index;
 }
