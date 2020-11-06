@@ -23,21 +23,14 @@ struct config {
   config(int argc, const char* argv[]);
 };
 
+using endpoint_t = struct sockaddr_in;
+
 struct mmsg {
-  struct endpoint;
+  using endpoint = endpoint_t;
   struct packet;
   struct client;
   struct peer;
   struct session;
-};
-
-struct mmsg::endpoint {
-  endpoint() = default;
-  endpoint(sockaddr_storage address, void* user_data)
-      : address(address), user_data(user_data) {
-  }
-  sockaddr_storage address = {};
-  void* user_data = nullptr;
 };
 
 struct mmsg::packet {
@@ -96,7 +89,7 @@ private:
   mmsg::peer peer_{};
 
   const urn_mmsg::config config_;
-  urn::relay<mmsg, false> logic_;
+  urn::relay<mmsg, true> logic_;
 };
 
 } // namespace urn_mmsg

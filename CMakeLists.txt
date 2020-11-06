@@ -10,7 +10,7 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 # Experiments
 # (note: all are turned off for Coverage build)
 option(urn_libuv "Experiment with libuv" OFF)
-option(urn_mmsg "Experiment with mmsg" OFF)
+option(urn_mmsg "Experiment with mmsg" ON)
 option(urn_uring "Experiment with uring" ON)
 
 # Business logic settings
