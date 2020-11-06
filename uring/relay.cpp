@@ -52,8 +52,14 @@ void ensure_success(int code) {
   abort();
 }
 
+struct listen_context;
+
 constexpr int32_t num_events = 16; // per thread
 constexpr int32_t memory_per_packet = 1024;
+
+volatile sig_atomic_t has_sigint = 0;
+
+thread_local listen_context* local_io = nullptr;
 
 enum ring_event_type {
   ring_event_type_invalid = 0,
@@ -64,8 +70,6 @@ enum ring_event_type {
 
   ring_event_MAX
 };
-
-struct listen_context;
 
 struct ring_event {
   ring_event_type type;
@@ -106,15 +110,12 @@ struct countdown_latch {
   std::condition_variable cond = {};
 };
 
-enum worker_flags { worker_flags_none = 0x0, worker_flags_report_stats = 0x01 };
-
 struct worker_args {
   urn_uring::relay* relay = nullptr;
   struct addrinfo* local_client_address = nullptr;
   struct addrinfo* local_peer_address = nullptr;
   int32_t thread_index = 0;
   countdown_latch* startup_latch = nullptr;
-  worker_flags flags = worker_flags_none;
 };
 
 struct listen_context {
@@ -133,8 +134,6 @@ struct listen_context {
   worker_args worker_info = {};
   struct iovec buffers_mem = {};
 };
-
-thread_local listen_context* local_io = nullptr;
 
 void print_address(const struct addrinfo* address) {
   char readable_ip[INET6_ADDRSTRLEN] = {0};
@@ -216,7 +215,50 @@ void release_event(listen_context* context, ring_event* ev) {
   context->free_event_ids.push_back(ev->index);
 }
 
+void report_features(const struct io_uring_params* params) {
+  uint32_t features = params->features;
+
+  auto get_name = [](uint32_t feature) {
+    switch (feature) {
+      case IORING_FEAT_SINGLE_MMAP:
+        return "IORING_FEAT_SINGLE_MMAP";
+      case IORING_FEAT_NODROP:
+        return "IORING_FEAT_NODROP";
+      case IORING_FEAT_SUBMIT_STABLE:
+        return "IORING_FEAT_SUBMIT_STABLE";
+      case IORING_FEAT_CUR_PERSONALITY:
+        return "IORING_FEAT_CUR_PERSONALITY";
+      case IORING_FEAT_FAST_POLL:
+        return "IORING_FEAT_FAST_POLL";
+      case IORING_FEAT_POLL_32BITS:
+        return "IORING_FEAT_POLL_32BITS";
+      case IORING_FEAT_SQPOLL_NONFIXED:
+        return "IORING_FEAT_SQPOLL_NONFIXED";
+      default:
+        return "unknown";
+    }
+  };
+
+  const uint32_t known_features[] = {IORING_FEAT_SINGLE_MMAP,    IORING_FEAT_NODROP,
+                                     IORING_FEAT_SUBMIT_STABLE,  IORING_FEAT_CUR_PERSONALITY,
+                                     IORING_FEAT_FAST_POLL,      IORING_FEAT_POLL_32BITS,
+                                     IORING_FEAT_SQPOLL_NONFIXED};
+
+  printf("supported features:\n");
+
+  for (uint32_t feature : known_features) {
+    if (features & feature) {
+      printf("\t%s\n", get_name(feature));
+    }
+  }
+}
+
+bool is_main_worker(const listen_context* io) { return io->worker_info.thread_index == 0; }
+
 void listen_context_initialize(listen_context* io, worker_args args) {
+  io->worker_info = args;
+  io->relay = args.relay;
+
   struct io_uring_params params;
   memset(&params, 0, sizeof(params));
 
@@ -228,8 +270,10 @@ void listen_context_initialize(listen_context* io, worker_args args) {
 
   ensure_success(io_uring_queue_init_params(4096, &io->ring, &params));
 
-  io->worker_info = args;
-  io->relay = args.relay;
+  if (is_main_worker(io)) {
+    report_features(&params);
+  }
+
   io->client_socket_fd = create_udp_socket(args.local_client_address);
   io->peer_socket_fd = create_udp_socket(args.local_peer_address);
   printf("[thread %d] sockets: %d %d\n", args.thread_index, io->client_socket_fd,
@@ -326,8 +370,6 @@ void add_timeout(struct io_uring* ring, ring_event* ev, int64_t milliseconds) {
   io_uring_sqe_set_data(sqe, ev);
 }
 
-volatile sig_atomic_t has_sigint = 0;
-
 void worker(worker_args args) {
   auto iop = std::make_unique<listen_context>();
   listen_context* io = iop.get();
@@ -353,7 +395,7 @@ void worker(worker_args args) {
     add_recvmsg(ring, ev, io->peer_socket);
   }
 
-  if (args.flags & worker_flags_report_stats) {
+  if (is_main_worker(io)) {
     ring_event* ev = alloc_event(io, ring_event_type_timer);
     add_timeout(ring, ev, k_statistics_timeout_ms);
   }
@@ -476,7 +518,6 @@ int relay::run() noexcept {
   }
 
   worker_args main_thread_args = make_worker_args(0);
-  main_thread_args.flags = worker_flags_report_stats;
 
   worker(main_thread_args);
 
