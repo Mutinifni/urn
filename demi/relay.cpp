@@ -2,7 +2,6 @@
 #include <cstring>
 #include <demi/relay.hpp>
 #include <deque>
-#include <dmtr/fail.h>
 #include <dmtr/libos.h>
 #include <dmtr/wait.h>
 #include <fcntl.h>
@@ -52,12 +51,21 @@ void ensure_success(int code) {
   abort();
 }
 
+void dmtr_ok(int res) {
+  if (res == 0) {
+    return;
+  }
+
+  fprintf(stderr, "dmtr error code %d", res);
+  abort();
+}
+
 int create_udp_socket(struct addrinfo* address_list) {
   struct addrinfo* address = address_list;
 
   int sfd;
-  DMTR_OK(dmtr_socket(&sfd, AF_INET, SOCK_DGRAM, 0));
-  DMTR_OK(dmtr_bind(sfd, address->ai_addr, address->ai_addrlen));
+  dmtr_ok(dmtr_socket(&sfd, AF_INET, SOCK_DGRAM, 0));
+  dmtr_ok(dmtr_bind(sfd, address->ai_addr, address->ai_addrlen));
 
   return sfd;
 }
@@ -142,8 +150,8 @@ void io_worker_init(io_worker* io, io_worker_args args) {
 int io_worker_begin_frame(io_worker* io) {
   io->clients_io.tx_length = 0;
 
-  DMTR_OK(dmtr_pop(&io->clients_io.rx.op_token, io->client_socket));
-  DMTR_OK(dmtr_pop(&io->peers_io.rx.op_token, io->peer_socket));
+  dmtr_ok(dmtr_pop(&io->clients_io.rx.op_token, io->client_socket));
+  dmtr_ok(dmtr_pop(&io->peers_io.rx.op_token, io->peer_socket));
 
   return 0;
 }
@@ -171,7 +179,7 @@ int worker(io_worker_args args) {
 
     int token_index = -1;
     printf("wait any\n");
-    DMTR_OK(dmtr_wait_any(&result, &token_index, tokens, 2));
+    dmtr_ok(dmtr_wait_any(&result, &token_index, tokens, 2));
 
     struct sockaddr_in from = result.qr_value.sga.sga_addr;
     dmtr_sgaseg_t sga = result.qr_value.sga.sga_segs[0];
@@ -234,16 +242,12 @@ void demi::session::start_send(const demi::packet& packet) noexcept {
 
   printf("send packet to port %u\n", io->clients_io.rx.res.qr_value.sga.sga_addr.sin_port);
   dmtr_qtoken_t qt;
-  if (0 != dmtr_pushto(&qt, io->client_socket, &io->clients_io.rx.res.qr_value.sga,
+  dmtr_ok(dmtr_pushto(&qt, io->client_socket, &io->clients_io.rx.res.qr_value.sga,
                        (const sockaddr*)&io->clients_io.rx.res.qr_value.sga.sga_addr,
-                       sizeof(struct sockaddr_in))) {
-    DMTR_PANIC("push to failed\n");
-  }
+                       sizeof(struct sockaddr_in)));
 
   dmtr_qresult_t qr;
-  if (dmtr_wait(&qr, qt) != 0) {
-    DMTR_PANIC("wait failed\n");
-  }
+  dmtr_ok(dmtr_wait(&qr, qt) != 0);
 
   io->relay->on_session_sent(*this, packet);
 }
