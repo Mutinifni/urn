@@ -18,7 +18,7 @@
 namespace urn_demi {
 
 config::config(int argc, const char* argv[])
-    : threads{static_cast<uint16_t>(std::thread::hardware_concurrency())} {
+    : threads{1} {
   for (int i = 1; i < argc; i++) {
     std::string_view arg(argv[i]);
     if (arg == "--threads") {
@@ -211,8 +211,6 @@ relay::relay(const urn_demi::config& conf) noexcept
     : config_{conf}, logic_{config_.threads, client_, peer_} {}
 
 int relay::run() noexcept {
-  int32_t thread_count = std::max(uint16_t(1), config_.threads);
-
   struct addrinfo* local_client_address = bindable_address("3478");
   struct addrinfo* local_peer_address = bindable_address("3479");
 
@@ -224,12 +222,6 @@ int relay::run() noexcept {
     args.local_peer_address = local_peer_address;
     return args;
   };
-
-  std::vector<std::thread> worker_threads;
-
-  for (int32_t i = 1; i < thread_count; i++) {
-    worker_threads.emplace_back(worker, create_worker_args(i));
-  }
 
   worker(create_worker_args(0));
 
