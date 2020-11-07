@@ -12,6 +12,7 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 option(urn_libuv "Experiment with libuv" OFF)
 option(urn_mmsg "Experiment with mmsg" ON)
 option(urn_uring "Experiment with uring" ON)
+option(urn_demi "Experiment with demikernel" OFF)
 
 # Business logic settings
 option(urn_unittests "Build unittests" OFF)
@@ -109,6 +110,10 @@ endif()
 
 if(urn_uring)
   include(uring/list.cmake)
+endif()
+
+if(urn_demi)
+  include(demi/list.cmake)
 endif()
 
 foreach(experiment ${urn_experiments})
