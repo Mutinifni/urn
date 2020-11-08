@@ -10,9 +10,10 @@ message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 # Experiments
 # (note: all are turned off for Coverage build)
 option(urn_libuv "Experiment with libuv" OFF)
-option(urn_mmsg "Experiment with mmsg" ON)
-option(urn_uring "Experiment with uring" ON)
+option(urn_mmsg "Experiment with mmsg" OFF)
+option(urn_uring "Experiment with uring" OFF)
 option(urn_demi "Experiment with demikernel" OFF)
+option(urn_seastar "Experiment with seastar" ON)
 
 # Business logic settings
 option(urn_unittests "Build unittests" OFF)
@@ -25,6 +26,8 @@ if(CMAKE_BUILD_TYPE MATCHES Coverage)
   set(urn_benchmarks OFF)
   set(urn_libuv OFF)
   set(urn_mmsg OFF)
+  set(urn_demi OFF)
+  set(urn_seastar OFF)
 endif()
 
 
@@ -114,6 +117,10 @@ endif()
 
 if(urn_demi)
   include(demi/list.cmake)
+endif()
+
+if(urn_seastar)
+  include(seastar/list.cmake)
 endif()
 
 foreach(experiment ${urn_experiments})

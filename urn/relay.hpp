@@ -100,6 +100,24 @@ public:
     return false;
   }
 
+  template <typename WithSession>
+  bool on_peer_received (const packet_type& packet, WithSession with_session)
+  {
+    update_io_statistics(this_thread_statistics_->in, packet);
+    if (packet.size() >= sizeof(session_id))
+    {
+      session_id id = get_session_id(packet.data());
+      if (auto session = find_session(id))
+      {
+        with_session(session);
+        return true;
+      }
+      // printf("session %lu not found\n", id);
+    }
+    peer_.start_receive();
+    return false;
+  }
+
 
   void on_session_sent (session_type &, const packet_type &packet)
   {
@@ -122,6 +140,20 @@ public:
       return &it->second;
     }
     return nullptr;
+  }
+
+  std::optional<session_type> receive_peer_data(const packet_type& packet) {
+    update_io_statistics(this_thread_statistics_->in, packet);
+    if (packet.size() >= sizeof(session_id))
+    {
+      session_id id = get_session_id(packet.data());
+      if (auto session = find_session(id))
+      {
+        return *session;
+      }
+    }
+  
+    return std::nullopt;
   }
 
 
