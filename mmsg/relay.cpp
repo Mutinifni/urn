@@ -15,6 +15,7 @@
 #include <sys/timerfd.h>
 #include <thread>
 #include <unistd.h>
+#include <sched.h>
 
 #define FEAT_RX_MAP_CPU 0
 #define FEAT_THREAD_MAP_CPU 1
@@ -307,7 +308,7 @@ void worker(io_worker_args args) {
   if (FEAT_THREAD_MAP_CPU) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(args.worker_index, &cpuset);
+    CPU_SET(sched_getcpu(), &cpuset);
     if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) != 0) {
       printf("thread affinity failed\n");
     }
