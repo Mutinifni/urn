@@ -14,6 +14,8 @@
 #include <thread>
 #include <unistd.h>
 
+#define FEAT_RX_MAP_CPU 1
+
 namespace urn_mmsg {
 
 config::config(int argc, const char* argv[])
@@ -90,6 +92,10 @@ int create_udp_socket(struct addrinfo* address_list) {
   }
 
   return socket_fd;
+}
+
+void set_socket_cpu_affinity(int socket_fd, int32_t cpu_id) {
+  ensure_success(setsockopt(socket_fd, SOL_SOCKET, SO_INCOMING_CPU, &cpu_id, sizeof(cpu_id)));
 }
 
 void bind_socket(int fd, struct addrinfo* address) {
@@ -277,6 +283,11 @@ void worker(io_worker_args args) {
   io_worker state;
   io_worker_init(&state, args);
   local_io = &state;
+
+  if (FEAT_RX_MAP_CPU) {
+    set_socket_cpu_affinity(state.client_socket, args.worker_index);
+    set_socket_cpu_affinity(state.peer_socket, args.worker_index);
+  }
 
   args.latch->wait();
 
