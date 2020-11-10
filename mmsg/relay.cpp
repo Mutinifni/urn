@@ -2,7 +2,9 @@
 #include <common/latch.h>
 #include <cstring>
 #include <deque>
+#include <error.h>
 #include <fcntl.h>
+#include <linux/filter.h>
 #include <mmsg/relay.hpp>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -14,8 +16,9 @@
 #include <thread>
 #include <unistd.h>
 
-#define FEAT_RX_MAP_CPU 1
+#define FEAT_RX_MAP_CPU 0
 #define FEAT_THREAD_MAP_CPU 1
+#define FEAT_BPF_SELECT_CORE 1
 
 namespace urn_mmsg {
 
@@ -93,6 +96,21 @@ int create_udp_socket(struct addrinfo* address_list) {
   }
 
   return socket_fd;
+}
+
+void attach_bpf(int fd) {
+  struct sock_filter code[] = {
+      /* A = raw_smp_processor_id() */
+      {BPF_LD | BPF_W | BPF_ABS, 0, 0, uint32_t(SKF_AD_OFF + SKF_AD_CPU)},
+      /* return A */
+      {BPF_RET | BPF_A, 0, 0, 0},
+  };
+  struct sock_fprog p;
+  p.len = 2;
+  p.filter = code;
+
+  if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p)))
+    error(1, errno, "failed to set SO_ATTACH_REUSEPORT_CBPF");
 }
 
 void set_socket_cpu_affinity(int socket_fd, int32_t cpu_id) {
@@ -216,9 +234,7 @@ void io_worker_init(io_worker* io, io_worker_args args) {
   io->worker_index = args.worker_index;
 }
 
-void io_worker_begin_frame(io_worker* io) {
-  io->clients_io.tx_length = 0;
-}
+void io_worker_begin_frame(io_worker* io) { io->clients_io.tx_length = 0; }
 
 void io_run_peer_receive_frame(io_worker* io) {
   int32_t messages_received =
@@ -281,6 +297,11 @@ void worker(io_worker_args args) {
   if (FEAT_RX_MAP_CPU) {
     set_socket_cpu_affinity(state.client_socket, args.worker_index);
     set_socket_cpu_affinity(state.peer_socket, args.worker_index);
+  }
+
+  if (FEAT_BPF_SELECT_CORE) {
+    attach_bpf(state.client_socket);
+    attach_bpf(state.peer_socket);
   }
 
   if (FEAT_THREAD_MAP_CPU) {
