@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #define FEAT_RX_MAP_CPU 1
+#define FEAT_THREAD_MAP_CPU 1
 
 namespace urn_mmsg {
 
@@ -287,6 +288,15 @@ void worker(io_worker_args args) {
   if (FEAT_RX_MAP_CPU) {
     set_socket_cpu_affinity(state.client_socket, args.worker_index);
     set_socket_cpu_affinity(state.peer_socket, args.worker_index);
+  }
+
+  if (FEAT_THREAD_MAP_CPU) {
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(args.worker_index, &cpuset);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) != 0) {
+      printf("thread affinity failed\n");
+    }
   }
 
   args.latch->wait();
