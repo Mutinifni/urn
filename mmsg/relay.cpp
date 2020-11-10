@@ -173,12 +173,6 @@ void io_vectors_init(io_vectors* vectors, uint8_t* mem, int32_t capacity, int32_
   }
 }
 
-void io_vectors_reset(io_vectors* vectors, int32_t count) {
-  for (int32_t i = 0; i < count; i++) {
-    vectors->vectors[i].iov_len = vectors->packet_size;
-  }
-}
-
 struct io_state {
   int32_t tx_length;
   io_vectors rx;
@@ -223,7 +217,6 @@ void io_worker_init(io_worker* io, io_worker_args args) {
 }
 
 void io_worker_begin_frame(io_worker* io) {
-  io_vectors_reset(&io->clients_io.tx, io->clients_io.tx_length);
   io->clients_io.tx_length = 0;
 }
 
