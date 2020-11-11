@@ -386,17 +386,28 @@ int relay::run() noexcept {
 
   urn::countdown_latch latch(thread_count);
 
-  auto create_worker_args = [=, &latch](int32_t worker_index) {
+  std::vector<int32_t> client_sockets;
+  std::vector<int32_t> peer_sockets;
+
+  for (int32_t i = 0; i < thread_count; i++) {
+    client_sockets.push_back(create_udp_socket(local_client_address));
+    peer_sockets.push_back(create_udp_socket(local_peer_address));
+  }
+
+  // Bind on main thread to avoid SO_REUSEPORT group ID races
+  for (int32_t i = 0; i < thread_count; i++) {
+    bind_socket(client_sockets[i], local_client_address);
+    bind_socket(peer_sockets[i], local_peer_address);
+  }
+
+  auto create_worker_args = [=, &latch, &client_sockets, &peer_sockets](int32_t worker_index) {
     io_worker_args args;
     args.worker_index = worker_index;
-    args.peer_socket = create_udp_socket(local_peer_address);
-    args.client_socket = create_udp_socket(local_client_address);
+    args.peer_socket = peer_sockets[worker_index];
+    args.client_socket = client_sockets[worker_index];
     args.relay = this;
     args.latch = &latch;
 
-    // Bind on main thread to avoid SO_REUSEPORT group ID races
-    bind_socket(args.client_socket, local_client_address);
-    bind_socket(args.peer_socket, local_peer_address);
     return args;
   };
 
