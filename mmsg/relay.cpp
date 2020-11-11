@@ -10,12 +10,12 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <random>
+#include <sched.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <thread>
 #include <unistd.h>
-#include <sched.h>
 
 #define FEAT_RX_MAP_CPU 0
 #define FEAT_THREAD_MAP_CPU 1
@@ -295,14 +295,9 @@ void worker(io_worker_args args) {
   io_worker_init(&state, args);
   local_io = &state;
 
-  if (FEAT_RX_MAP_CPU) {
+  if (FEAT_RX_MAP_CPU > 0) {
     set_socket_cpu_affinity(state.client_socket, args.worker_index);
     set_socket_cpu_affinity(state.peer_socket, args.worker_index);
-  }
-
-  if (FEAT_BPF_SELECT_CORE) {
-    attach_bpf(state.client_socket);
-    attach_bpf(state.peer_socket);
   }
 
   if (FEAT_THREAD_MAP_CPU) {
@@ -390,8 +385,16 @@ int relay::run() noexcept {
   std::vector<int32_t> peer_sockets;
 
   for (int32_t i = 0; i < thread_count; i++) {
-    client_sockets.push_back(create_udp_socket(local_client_address));
-    peer_sockets.push_back(create_udp_socket(local_peer_address));
+    int32_t client_socket = create_udp_socket(local_client_address);
+    int32_t peer_socket = create_udp_socket(local_peer_address);
+
+    client_sockets.push_back(client_socket);
+    peer_sockets.push_back(peer_socket);
+
+    if (FEAT_BPF_SELECT_CORE) {
+      attach_bpf(client_socket);
+      attach_bpf(peer_socket);
+    }
   }
 
   // Bind on main thread to avoid SO_REUSEPORT group ID races
