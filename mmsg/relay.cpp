@@ -206,9 +206,9 @@ void io_state_init(io_state* io, uint8_t* mem, int32_t capacity) {
 
 struct io_worker_args {
   int32_t worker_index;
+  int32_t client_socket;
+  int32_t peer_socket;
   urn_mmsg::relay* relay;
-  struct addrinfo* local_client_address;
-  struct addrinfo* local_peer_address;
   urn::countdown_latch* latch;
 };
 
@@ -224,8 +224,8 @@ struct io_worker {
 
 void io_worker_init(io_worker* io, io_worker_args args) {
   io->relay = args.relay;
-  io->peer_socket = create_udp_socket(args.local_peer_address);
-  io->client_socket = create_udp_socket(args.local_client_address);
+  io->peer_socket = args.peer_socket;
+  io->client_socket = args.client_socket;
 
   io->message_mem = (uint8_t*)calloc(k_mmsg_capacity, k_memory_per_packet);
 
@@ -308,16 +308,13 @@ void worker(io_worker_args args) {
   if (FEAT_THREAD_MAP_CPU) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(sched_getcpu(), &cpuset);
+    CPU_SET(args.worker_index, &cpuset);
     if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) != 0) {
       printf("thread affinity failed\n");
     }
   }
 
   args.latch->wait();
-
-  bind_socket(state.client_socket, args.local_client_address);
-  bind_socket(state.peer_socket, args.local_peer_address);
 
   int statistics_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
   ensure_success(statistics_timer_fd);
@@ -392,10 +389,14 @@ int relay::run() noexcept {
   auto create_worker_args = [=, &latch](int32_t worker_index) {
     io_worker_args args;
     args.worker_index = worker_index;
+    args.peer_socket = create_udp_socket(local_peer_address);
+    args.client_socket = create_udp_socket(local_client_address);
     args.relay = this;
-    args.local_client_address = local_client_address;
-    args.local_peer_address = local_peer_address;
     args.latch = &latch;
+
+    // Bind on main thread to avoid SO_REUSEPORT group ID races
+    bind_socket(args.client_socket, local_client_address);
+    bind_socket(args.peer_socket, local_peer_address);
     return args;
   };
 
