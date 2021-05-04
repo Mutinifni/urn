@@ -1,5 +1,8 @@
-find_library(uring_LIBRARY NAMES uring)
-find_path(uring_INCLUDE_DIR NAMES liburing.h)
+#find_library(uring_LIBRARY NAMES uring)
+#find_path(uring_INCLUDE_DIR NAMES liburing.h)
+
+find_library(uring_LIBRARY NAMES uring HINTS "/scratch/pratyush/liburing/src/")
+find_path(uring_INCLUDE_DIR NAMES liburing.h HINTS "/scratch/pratyush/liburing/src/include/")
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(uring

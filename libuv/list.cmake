@@ -1,5 +1,7 @@
-find_library(libuv_LIBRARY NAMES uv)
-find_path(libuv_INCLUDE_DIR NAMES uv.h)
+#find_library(libuv_LIBRARY NAMES uv)
+
+find_library(libuv_LIBRARY NAMES uv HINTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libuv_libuv/build/")
+find_path(libuv_INCLUDE_DIR NAMES uv.h HINTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/libuv_libuv/include/")
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(libuv
@@ -30,4 +32,4 @@ list(APPEND urn_libuv_sources
   libuv/relay.cpp
 )
 
-list(APPEND urn_libuv_libs ${libuv_LIBRARY})
+list(APPEND urn_libuv_libs ${libuv_LIBRARY} Threads::Threads)

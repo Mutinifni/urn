@@ -5,10 +5,25 @@
 #include <netinet/in.h>
 #include <urn/relay.hpp>
 
+extern uint64_t num_packets;
+extern uint64_t recv_packets;
+extern uint64_t start_time;
+extern uint64_t tstart;
+extern uint64_t tnext;
+
+static inline uint64_t rdtscp(uint32_t *auxp)
+{
+    uint32_t a, d, c;
+    asm volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
+    if (auxp)
+        *auxp = c;
+    return ((uint64_t)a) | (((uint64_t)d) << 32);
+}
+
 namespace urn_demi {
 
 struct config {
-  static constexpr std::chrono::seconds statistics_print_interval{5};
+  static constexpr std::chrono::seconds statistics_print_interval{1};
 
   struct {
     const char* port = "3478";

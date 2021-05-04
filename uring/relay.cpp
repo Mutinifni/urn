@@ -2,7 +2,10 @@
 #include <array>
 #include <condition_variable>
 #include <cstring>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 #include <liburing.h>
+#pragma GCC diagnostic pop
 #include <netdb.h>
 #include <signal.h>
 #include <string>
@@ -86,7 +89,7 @@ struct ring_event {
   };
 };
 
-constexpr int64_t k_statistics_timeout_ms = 5000;
+constexpr int64_t k_statistics_timeout_ms = 1000;
 
 struct countdown_latch {
   countdown_latch(int64_t count) : count{count} {}

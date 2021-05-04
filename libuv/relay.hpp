@@ -57,7 +57,7 @@ inline void die_on_error (int code, const char *fn, const char *file, int line)
 
 struct config //{{{1
 {
-  static constexpr std::chrono::seconds statistics_print_interval{5};
+  static constexpr std::chrono::seconds statistics_print_interval{1};
 
   struct
   {

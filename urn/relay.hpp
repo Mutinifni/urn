@@ -68,10 +68,11 @@ public:
   void on_client_received (const endpoint_type &src, const packet_type &packet)
   {
     update_io_statistics(this_thread_statistics_->in, packet);
+    printf("packet size: %zu\n", packet.size());
     if (packet.size() == sizeof(session_id))
     {
       session_id id = get_session_id(packet.data());
-      // printf("client received sess %lu\n", id);
+      printf("client received sess %lu\n", id);
       if (try_register_session(id, src))
       {
         peer_.start_receive();
@@ -86,6 +87,7 @@ public:
     update_io_statistics(this_thread_statistics_->in, packet);
     if (packet.size() >= sizeof(session_id))
     {
+      //printf("peer packet size: %zu\n", packet.size());
       session_id id = get_session_id(packet.data());
       if (auto session = find_session(id))
       {
@@ -252,13 +254,13 @@ private:
   }
 
 
-  static constexpr std::pair<size_t, const char *> bits_per_sec (
+  static constexpr std::pair<double, const char *> bits_per_sec (
     size_t bytes, const std::chrono::seconds &interval) noexcept
   {
     constexpr const char *units[] = { "bps", "Kbps", "Mbps", "Gbps", };
     auto unit = std::cbegin(units);
 
-    auto bits_per_sec = 8 * bytes / interval.count();
+    auto bits_per_sec = (8.0 * bytes) / interval.count();
     while (bits_per_sec > 1000 && (unit + 1) != std::cend(units))
     {
       bits_per_sec /= 1000;

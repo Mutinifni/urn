@@ -1,9 +1,11 @@
+set(CMAKE_VERBOSE_MAKEFILE ON)
 cmake_minimum_required(VERSION 3.8)
 
 project(urn LANGUAGES CXX C)
 include(cmake/project_version.cmake)
 message(STATUS "${CMAKE_PROJECT_NAME} ${CMAKE_PROJECT_VERSION}")
 
+#SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wno-pedantic")
 
 # User settings {{{1
 
@@ -13,7 +15,7 @@ option(urn_libuv "Experiment with libuv" OFF)
 option(urn_mmsg "Experiment with mmsg" OFF)
 option(urn_uring "Experiment with uring" OFF)
 option(urn_demi "Experiment with demikernel" OFF)
-option(urn_seastar "Experiment with seastar" ON)
+option(urn_seastar "Experiment with seastar" OFF)
 
 # Business logic settings
 option(urn_unittests "Build unittests" OFF)

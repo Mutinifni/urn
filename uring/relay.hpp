@@ -8,7 +8,7 @@
 namespace urn_uring {
 
 struct config {
-  static constexpr std::chrono::seconds statistics_print_interval{5};
+  static constexpr std::chrono::seconds statistics_print_interval{1};
 
   struct {
     const char* port = "3478";
